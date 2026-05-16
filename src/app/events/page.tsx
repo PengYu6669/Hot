@@ -4,7 +4,7 @@ import { HeatGauge } from "../components/detail/HeatGauge";
 import { LifecycleTimeline } from "../components/detail/LifecycleTimeline";
 import { RiskBlock } from "../components/detail/RiskBlock";
 import { FactorWaterfall } from "../components/detail/FactorWaterfall";
-import { InsightCardMatrix } from "../components/detail/TagCloud";
+import type { ReactNode } from "react";
 
 export default async function EventsPage({
   searchParams,
@@ -22,229 +22,408 @@ export default async function EventsPage({
   const strategy = event ? dashboard.strategies[event.id] : null;
 
   return (
-    <AppShell
-      eyebrow="Event Detail"
-      title="单事件看清楚"
-      description="L1 看指标做决策，L2 看评分依据和证据链。所有数据来自 AI HOT API + 本地评分规则，无 Mock。"
-    >
+    <AppShell eyebrow="Event Detail" title="单事件看清楚">
       {event ? (
-        <div className="grid gap-4">
-          {/* L1: Core metrics — responsive grid */}
-          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <div className="rounded-lg border border-[#dcd8cf] bg-white p-4 md:p-5 shadow-sm">
-              <HeatGauge value={event.heatScore} level={event.heatLevel} />
-            </div>
-            <div className="rounded-lg border border-[#dcd8cf] bg-white p-4 md:p-5 shadow-sm">
-              <LifecycleTimeline current={event.lifecycleStage} />
-            </div>
-            <div className="rounded-lg border border-[#dcd8cf] bg-white p-4 md:p-5 shadow-sm sm:col-span-2 lg:col-span-1">
-              <RiskBlock level={event.riskLevel} />
+        <div className="grid gap-3">
+          <section className="rounded-lg border border-[#dcd8cf] bg-white p-4 shadow-sm">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold text-[#666]">
+                  <Badge>{event.sourceName}</Badge>
+                  <Badge>{event.eventTypeLabel}</Badge>
+                  <Badge>{event.lifecycleLabel}</Badge>
+                  <Badge>{event.riskLabel} 风险</Badge>
+                  <Badge>{event.publishedLabel}</Badge>
+                </div>
+                <h2 className="mt-3 text-2xl font-semibold leading-tight md:text-3xl">
+                  {event.title}
+                </h2>
+                <p className="mt-2 max-w-4xl text-sm leading-6 text-[#444]">
+                  {event.summary}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Pill kind="hot">看清楚：{event.reason}</Pill>
+                  <Pill kind="soft">{event.intervention}</Pill>
+                </div>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2 xl:w-[360px]">
+                <MetricTile
+                  label="热度"
+                  value={`${event.heatScore}`}
+                  hint={`${event.heatLevel} 级`}
+                />
+                <MetricTile
+                  label="生命周期"
+                  value={event.lifecycleLabel}
+                  hint="窗口判断"
+                />
+                <MetricTile
+                  label="风险"
+                  value={event.riskLabel}
+                  hint="发布前复核"
+                />
+                <MetricTile
+                  label="来源"
+                  value={event.source}
+                  hint={event.sourceName}
+                />
+              </div>
             </div>
           </section>
 
-          {/* L2: Factor breakdown + insight */}
-          <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
-            <section className="rounded-lg border border-[#dcd8cf] bg-white p-4 md:p-5 shadow-sm">
-              <FactorWaterfall factors={event.scoreFactors} />
-
-              {/* Scoring rule explainer */}
-              <div className="mt-5 p-3 rounded-lg bg-[#fbfaf7] border border-[#e8e5dd]">
-                <p className="text-[11px] font-semibold text-[#666] mb-2">评分规则说明</p>
-                <div className="grid gap-1.5 text-[11px] text-[#555] leading-relaxed">
-                  <p>· <strong>时效信号</strong>：发布时间 ≤6h 得 26 分，≤24h 得 21 分，≤72h 得 15 分</p>
-                  <p>· <strong>事件类型</strong>：模型发布 24 分，产品更新 22 分，行业动态 20 分，论文 17 分，观点 14 分</p>
-                  <p>· <strong>语义强度</strong>：基础 16 分 + 命中 OpenAI/Agent/开源等关键词每个 +3 分，上限 28</p>
-                  <p>· <strong>可信来源</strong>：基础 16 分 + 有摘要 +4 分 + 有原文链接 +2 分</p>
+          <section className="grid gap-3 lg:grid-cols-[1.08fr_0.92fr]">
+            <div className="grid gap-3">
+              <section className="rounded-lg border border-[#dcd8cf] bg-white p-4 shadow-sm">
+                <SectionHeader
+                  eyebrow="Heat / Lifecycle / Risk"
+                  title="热点态势"
+                  meta="单屏看热度、窗口和风险边界"
+                />
+                <div className="mt-3 grid gap-3 xl:grid-cols-[0.92fr_1.08fr]">
+                  <div className="rounded-lg border border-[#e8e5dd] bg-[#fbfaf7] p-3">
+                    <HeatGauge
+                      value={event.heatScore}
+                      level={event.heatLevel}
+                    />
+                  </div>
+                  <div className="grid gap-3">
+                    <div className="rounded-lg border border-[#e8e5dd] bg-[#fbfaf7] p-3">
+                      <LifecycleTimeline current={event.lifecycleStage} />
+                    </div>
+                    <RiskBlock level={event.riskLevel} />
+                  </div>
                 </div>
-                <p className="mt-2 text-[10px] text-[#999]">
-                  分级阈值：≥85 为 S 级（优先介入），70-84 为 A 级（策略池），&lt;70 为 B 级（观察）。
-                </p>
-              </div>
-            </section>
+              </section>
 
-            <section className="rounded-lg border border-[#dcd8cf] bg-white p-4 md:p-5 shadow-sm">
-              <InsightCardMatrix
-                items={[
-                  { label: "平台导向", value: event.insight.platformDirection },
-                  { label: "运营目标", value: event.insight.operationGoal },
-                  { label: "内容角度", value: event.insight.contentAngle },
-                  { label: "用户情绪", value: event.insight.userEmotion },
-                ]}
-              />
-              <p className="mt-3 text-[10px] text-[#999]">
-                以上 insight 基于事件标题/摘要关键词匹配规则生成，非 LLM 推理。
-              </p>
-            </section>
-          </div>
+              <section className="rounded-lg border border-[#dcd8cf] bg-white p-4 shadow-sm">
+                <SectionHeader
+                  eyebrow="Scoring"
+                  title="热度因子与运营判断"
+                  meta="把分数翻译成动作，不把页面做成日志墙"
+                />
+                <div className="mt-3 grid gap-3 xl:grid-cols-[1.08fr_0.92fr]">
+                  <FactorWaterfall factors={event.scoreFactors} />
+                  <div className="grid gap-2">
+                    <DenseBlock
+                      label="平台导向"
+                      value={event.insight.platformDirection}
+                    />
+                    <DenseBlock
+                      label="运营目标"
+                      value={event.insight.operationGoal}
+                    />
+                    <DenseBlock
+                      label="内容角度"
+                      value={event.insight.contentAngle}
+                    />
+                    <DenseBlock
+                      label="用户情绪"
+                      value={event.insight.userEmotion}
+                    />
+                    <div className="rounded-lg border border-[#e8e5dd] bg-[#fbfaf7] p-3">
+                      <p className="text-[11px] font-semibold uppercase text-[#707070]">
+                        介入建议
+                      </p>
+                      <p className="mt-1 text-sm leading-6 text-[#333]">
+                        {event.intervention}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
 
-          {/* Strategy */}
+            <aside className="grid gap-3">
+              <section className="rounded-lg border border-[#dcd8cf] bg-white p-4 shadow-sm">
+                <SectionHeader
+                  eyebrow="Insight"
+                  title="事件画像"
+                  meta="把事件边界压成可扫读信息"
+                />
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <MiniField label="事件类型" value={event.eventTypeLabel} />
+                  <MiniField label="热度等级" value={event.heatLevel} />
+                  <MiniField label="生命周期" value={event.lifecycleLabel} />
+                  <MiniField label="风险等级" value={event.riskLabel} />
+                </div>
+                <div className="mt-3 grid gap-2">
+                  {event.tags.map((tag) => (
+                    <div
+                      key={tag}
+                      className="flex items-center justify-between rounded-lg border border-[#e8e5dd] bg-[#fbfaf7] px-3 py-2 text-sm"
+                    >
+                      <span className="font-medium text-[#222]">{tag}</span>
+                      <span className="text-[11px] text-[#888]">标签</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="rounded-lg border border-[#dcd8cf] bg-white p-4 shadow-sm">
+                <SectionHeader
+                  eyebrow="Source"
+                  title="来源与摘要"
+                  meta="先看信源，再决定要不要追"
+                />
+                <div className="mt-3 grid gap-2 text-sm leading-6 text-[#333]">
+                  <DenseBlock label="信源" value={event.sourceName} />
+                  <DenseBlock label="原文链接" value={event.sourceUrl} />
+                  <DenseBlock label="原始摘要" value={event.summary} />
+                </div>
+              </section>
+            </aside>
+          </section>
+
           {strategy ? (
-            <section className="rounded-lg border border-[#dcd8cf] bg-white p-4 md:p-5 shadow-sm">
-              <div className="flex items-center gap-2">
-                <p className="text-xs font-bold uppercase text-[#6b6b6b]">Strategy</p>
-                {strategy.llmGenerated && (
-                  <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-bold text-green-700">
+            <section className="rounded-lg border border-[#dcd8cf] bg-white p-4 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <SectionHeader
+                  eyebrow="Strategy"
+                  title="运营方案"
+                  meta="脚本、动作、风控和承接放在同一层"
+                />
+                {strategy.llmGenerated ? (
+                  <span className="rounded-full border border-green-200 bg-green-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-green-700">
                     LLM
+                  </span>
+                ) : (
+                  <span className="rounded-full border border-[#e8e5dd] bg-[#fbfaf7] px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-[#777]">
+                    Fallback
                   </span>
                 )}
               </div>
-              <h2 className="mt-1 text-xl font-semibold">运营方案</h2>
 
-              {/* Agent reasoning — real LLM output */}
-              {strategy.llmGenerated && strategy.agentReasoning && (
-                <div className="mt-3 rounded-lg bg-[#fff7ed] p-3 border border-[#f0a060]/30">
-                  <p className="text-[11px] font-bold text-[#e8752a] mb-1">Agent 推理链</p>
-                  <p className="text-sm leading-6 whitespace-pre-wrap">{strategy.agentReasoning}</p>
+              <div className="mt-3 grid gap-3 xl:grid-cols-[1.1fr_0.9fr]">
+                <div className="grid gap-3">
+                  <div className="rounded-lg border border-[#e8e5dd] bg-[#fbfaf7] p-3">
+                    <p className="text-[11px] font-semibold uppercase text-[#707070]">
+                      标题
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {strategy.campaignBrief.titles.map((title) => (
+                        <span
+                          key={title}
+                          className="rounded-full border border-[#e8e5dd] bg-white px-3 py-1.5 text-sm leading-5 text-[#222]"
+                        >
+                          {title}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <DenseBlock
+                      label="脚本"
+                      value={strategy.campaignBrief.shortVideoScript}
+                    />
+                    <DenseBlock
+                      label="风险边界"
+                      value={strategy.campaignBrief.riskGuardrail}
+                    />
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <DenseBlock
+                      label="热度分析"
+                      value={strategy.heatAnalysis}
+                    />
+                    <DenseBlock
+                      label="风险评估"
+                      value={strategy.riskAssessment}
+                    />
+                  </div>
                 </div>
-              )}
 
-              {/* Campaign brief titles */}
-              <div className="mt-4 grid gap-2">
-                {strategy.campaignBrief.titles.map((title) => (
-                  <strong
-                    className="rounded-lg bg-[#fbfaf7] p-3 text-sm border border-[#e8e5dd]"
-                    key={title}
-                  >
-                    {title}
-                  </strong>
-                ))}
+                <div className="grid gap-3">
+                  <div className="rounded-lg border border-[#e8e5dd] bg-[#fbfaf7] p-3">
+                    <p className="text-[11px] font-semibold uppercase text-[#707070]">
+                      抖音化运营动作
+                    </p>
+                    <div className="mt-2 grid gap-2 text-sm leading-6 text-[#333]">
+                      <CompactKV
+                        label="达人类型"
+                        value={strategy.douyinOperationPlan.creatorArchetypes.join("、")}
+                      />
+                      <CompactKV
+                        label="内容形式"
+                        value={strategy.douyinOperationPlan.contentFormats.join("、")}
+                      />
+                      <CompactKV
+                        label="放量 / 停投"
+                        value={`${strategy.douyinOperationPlan.trafficRule} ${strategy.douyinOperationPlan.stopRule}`}
+                      />
+                      <CompactKV
+                        label="风险审核"
+                        value={strategy.douyinOperationPlan.riskChecklist.join("；")}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-[#e8e5dd] bg-[#fbfaf7] p-3">
+                    <p className="text-[11px] font-semibold uppercase text-[#707070]">
+                      承接与复用
+                    </p>
+                    <div className="mt-2 grid gap-2 text-sm leading-6 text-[#333]">
+                      <CompactKV
+                        label="流量资产"
+                        value={strategy.monetizationPlan.trafficAsset}
+                      />
+                      <CompactKV
+                        label="转化路径"
+                        value={strategy.monetizationPlan.conversionPath}
+                      />
+                      <CompactKV
+                        label="承接产品"
+                        value={strategy.monetizationPlan.offer}
+                      />
+                      <CompactKV
+                        label="复盘指标"
+                        value={strategy.monetizationPlan.successMetric}
+                      />
+                      <CompactKV
+                        label="复制方法"
+                        value={strategy.replicationPlaybook.pattern}
+                      />
+                      <CompactKV
+                        label="放量规则"
+                        value={strategy.replicationPlaybook.scaleRule}
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
-              <p className="mt-3 rounded-lg bg-[#fbfaf7] p-3 text-sm leading-6 border border-[#e8e5dd]">
-                {strategy.campaignBrief.shortVideoScript}
-              </p>
-              <p className="mt-3 rounded-lg bg-[#fbfaf7] p-3 text-xs leading-5 border border-[#e8e5dd] text-[#666]">
-                {strategy.campaignBrief.riskGuardrail}
-              </p>
-
-              {/* LLM analysis sections */}
-              {strategy.llmGenerated && (
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  {strategy.heatAnalysis && (
-                    <div className="rounded-lg bg-[#fbfaf7] p-3 border border-[#e8e5dd]">
-                      <p className="text-[11px] font-bold text-[#6b6b6b] mb-1">热度分析</p>
-                      <p className="text-xs leading-5 whitespace-pre-wrap">{strategy.heatAnalysis}</p>
-                    </div>
-                  )}
-                  {strategy.riskAssessment && (
-                    <div className="rounded-lg bg-[#fbfaf7] p-3 border border-[#e8e5dd]">
-                      <p className="text-[11px] font-bold text-[#6b6b6b] mb-1">风险评估</p>
-                      <p className="text-xs leading-5 whitespace-pre-wrap">{strategy.riskAssessment}</p>
-                    </div>
-                  )}
-                </div>
-              )}
             </section>
           ) : null}
-
-          {/* ROI estimate — real data from hot-events.ts */}
-          <section className="rounded-lg border border-[#dcd8cf] bg-white p-4 md:p-5 shadow-sm">
-            <p className="text-xs font-bold uppercase text-[#6b6b6b]">ROI 预估</p>
-            <h2 className="mt-1 text-xl font-semibold">运营指标估算</h2>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {[
-                { label: "响应时长", value: event.roi.responseTime },
-                { label: "人力节省", value: event.roi.manualTimeSaved },
-                { label: "内容召回", value: event.roi.contentRecall },
-                { label: "预期转化", value: event.roi.expectedConversion },
-              ].map((m) => (
-                <div key={m.label} className="rounded-lg bg-[#fbfaf7] border border-[#e8e5dd] p-3">
-                  <span className="text-[11px] text-[#999]">{m.label}</span>
-                  <p className="mt-1 text-sm font-semibold leading-5">{m.value}</p>
-                </div>
-              ))}
-            </div>
-            <p className="mt-3 text-[10px] text-[#999]">
-              ROI 估算基于热度等级和生命周期的代理公式，非真实业务数据。真实业务中需接入内容消费和转化归因。
-            </p>
-          </section>
-
-          {/* Creator match placeholder — honest about status */}
-          <section className="rounded-lg border border-[#dcd8cf] bg-white p-4 md:p-5 shadow-sm">
-            <p className="text-xs font-bold uppercase text-[#6b6b6b]">Creator Match</p>
-            <h2 className="mt-1 text-xl font-semibold">创作者撮合</h2>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {getRecommendedCreators(event).map((name) => (
-                <div key={name} className="rounded-lg border border-[#e8e5dd] bg-[#fbfaf7] p-3 flex items-center gap-3">
-                  <div className="size-10 rounded-full bg-[#f0a060]/20 flex items-center justify-center text-[#f0a060] font-bold text-sm shrink-0">
-                    {name.slice(0, 2)}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold truncate">{name}</p>
-                    <p className="text-[10px] text-[#999]">创作者库待接入</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <p className="mt-3 text-[10px] text-[#999]">
-              创作者名单来自 eventType 规则匹配（src/lib/hot-events.ts getRecommendedCreators）。
-              粉丝数、历史 ROI、档期等数据需接入创作者中台 API。
-            </p>
-          </section>
-
-          {/* Similar cases placeholder */}
-          <section className="rounded-lg border border-[#dcd8cf] bg-white p-4 md:p-5 shadow-sm">
-            <p className="text-xs font-bold uppercase text-[#6b6b6b]">Reference</p>
-            <h2 className="mt-1 text-xl font-semibold">运营经验库</h2>
-            <p className="mt-2 text-sm text-[#666] leading-6">
-              当前为人工总结的运营案例模板。待积累足够真实运营数据后，可通过向量检索匹配历史相似事件和已验证策略。
-            </p>
-            <div className="mt-4 grid gap-3 sm:grid-cols-3">
-              {[
-                { title: "模型发布类", action: "解释型首发 → 工具场景二创 → 评论区征集" },
-                { title: "产品更新类", action: "功能拆解 → 效率对比 → 用户教程" },
-                { title: "行业动态类", action: "趋势解读 → 影响分析 → 行动建议" },
-              ].map((c) => (
-                <div key={c.title} className="rounded-lg border border-[#e8e5dd] bg-[#fbfaf7] p-3">
-                  <p className="text-sm font-semibold">{c.title}</p>
-                  <p className="mt-2 text-xs leading-5 text-[#666]">{c.action}</p>
-                </div>
-              ))}
-            </div>
-            <p className="mt-3 text-[10px] text-[#999]">
-              当前为静态运营经验总结，非 RAG 检索结果。RAG 需历史案例库积累和数据标注支持。
-            </p>
-          </section>
-
-          {/* SOP nodes — real data from hot-events.ts */}
-          <section className="rounded-lg border border-[#dcd8cf] bg-white p-4 md:p-5 shadow-sm">
-            <p className="text-xs font-bold uppercase text-[#6b6b6b]">SOP</p>
-            <h2 className="mt-1 text-xl font-semibold">运营流水线节点</h2>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {event.sop.map((node) => (
-                <div
-                  key={node.name}
-                  className={`rounded-lg border p-3 ${
-                    node.status === "done"
-                      ? "border-green-300 bg-green-50/60"
-                      : node.status === "running"
-                        ? "border-[#f0a060] bg-[#fff7ed]"
-                        : node.status === "guarded"
-                          ? "border-red-300 bg-red-50/60"
-                          : "border-[#e8e5dd] bg-[#fbfaf7]"
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold">{node.name}</span>
-                    <span className="text-[10px] text-[#999]">{node.owner}</span>
-                  </div>
-                  <p className="mt-2 text-xs leading-5 text-[#555]">
-                    输入：{node.input}<br />
-                    动作：{node.action}<br />
-                    输出：{node.output}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </section>
         </div>
       ) : null}
     </AppShell>
   );
 }
 
-function getRecommendedCreators(event: { eventType: string }) {
-  if (event.eventType === "paper") return ["@论文精读室", "@AI研究员日常", "@模型观察站"];
-  if (event.eventType === "ai-model") return ["@模型测评局", "@AI效率研究所", "@开源情报站"];
-  if (event.eventType === "ai-product") return ["@产品增长笔记", "@AI工具箱", "@创业者日报"];
-  return ["@AI商业观察", "@科技热点局", "@趋势拆解员"];
+function SectionHeader({
+  eyebrow,
+  title,
+  meta,
+}: {
+  eyebrow: string;
+  title: string;
+  meta?: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] font-bold uppercase tracking-wide text-[#707070]">
+        {eyebrow}
+      </p>
+      <div className="mt-1 flex flex-wrap items-baseline gap-2">
+        <h2 className="text-base font-semibold md:text-lg">{title}</h2>
+        {meta ? (
+          <span className="text-[11px] text-[#888]">{meta}</span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function MetricTile({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+}) {
+  return (
+    <div className="rounded-lg border border-[#e8e5dd] bg-[#fbfaf7] p-3">
+      <p className="text-[11px] font-semibold uppercase text-[#707070]">
+        {label}
+      </p>
+      <p className="mt-1 text-lg font-semibold text-[#222]">{value}</p>
+      <p className="mt-1 text-[11px] leading-4 text-[#888]">{hint}</p>
+    </div>
+  );
+}
+
+function Pill({
+  children,
+  kind = "soft",
+}: {
+  children: ReactNode;
+  kind?: "soft" | "hot";
+}) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium ${
+        kind === "hot"
+          ? "border-[#f0a060]/40 bg-[#fff7ed] text-[#b85b12]"
+          : "border-[#e8e5dd] bg-[#fbfaf7] text-[#555]"
+      }`}
+    >
+      {children}
+    </span>
+  );
+}
+
+function Badge({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center rounded-full border border-[#e8e5dd] bg-[#fbfaf7] px-2.5 py-1 text-[11px] font-semibold text-[#555]">
+      {children}
+    </span>
+  );
+}
+
+function DenseBlock({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-lg border border-[#e8e5dd] bg-[#fbfaf7] p-3">
+      <p className="text-[11px] font-semibold uppercase text-[#707070]">
+        {label}
+      </p>
+      <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-[#333]">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function MiniField({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-lg border border-[#e8e5dd] bg-[#fbfaf7] px-3 py-2">
+      <p className="text-[11px] font-semibold uppercase text-[#707070]">
+        {label}
+      </p>
+      <p className="mt-1 text-sm font-medium text-[#222]">{value}</p>
+    </div>
+  );
+}
+
+function CompactKV({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-md border border-[#e8e5dd] bg-white px-3 py-2">
+      <p className="text-[11px] font-semibold uppercase text-[#707070]">
+        {label}
+      </p>
+      <p className="mt-1 text-sm leading-6 text-[#333] whitespace-pre-wrap break-words">
+        {value}
+      </p>
+    </div>
+  );
 }

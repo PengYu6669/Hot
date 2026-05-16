@@ -26,6 +26,40 @@ button:focus-visible {
   outline-offset: 3px;
 }
 
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #d4cfc5 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #d4cfc5;
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (min-width: 1280px) {
+  .dashboard-workspace {
+    overscroll-behavior: contain;
+  }
+
+  .dashboard-workspace > * {
+    scrollbar-gutter: stable;
+  }
+
+  .dashboard-workspace > *::-webkit-scrollbar,
+  .dashboard-workspace [class*="overflow-y-auto"]::-webkit-scrollbar {
+    width: 5px;
+  }
+}
+
 /* Pipeline pulse animation */
 @keyframes pipeline-pulse {
   0%, 100% {

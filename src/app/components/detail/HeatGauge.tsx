@@ -1,6 +1,10 @@
 "use client";
 
-import ReactECharts from "echarts-for-react";
+import dynamic from "next/dynamic";
+
+const ReactECharts = dynamic(() => import("echarts-for-react"), {
+  ssr: false,
+});
 
 export function HeatGauge({
   value,
@@ -55,7 +59,7 @@ export function HeatGauge({
 
   return (
     <div className={className}>
-      <ReactECharts option={option} style={{ height: 240 }} notMerge />
+      <ReactECharts option={option} style={{ height: 180 }} notMerge />
       <p className="-mt-6 text-center text-xs font-semibold text-[#666]">
         {level} 级热度
       </p>

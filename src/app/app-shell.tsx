@@ -7,6 +7,7 @@ const navItems = [
   { href: "/", label: "工作台" },
   { href: "/events", label: "事件详情" },
   { href: "/workflow", label: "Agent 编排" },
+  { href: "/review", label: "复盘指标" },
 ];
 
 export function AppShell({
@@ -35,7 +36,7 @@ export function AppShell({
                 {title}
               </h1>
               {description ? (
-                <p className="mt-1 md:mt-2 max-w-4xl text-xs md:text-sm lg:text-base leading-5 md:leading-6 text-[#444444] line-clamp-2 md:line-clamp-none">
+                <p className="mt-1 md:mt-2 max-w-4xl text-xs md:text-sm lg:text-base leading-5 md:leading-6 text-[#444444]">
                   {description}
                 </p>
               ) : null}

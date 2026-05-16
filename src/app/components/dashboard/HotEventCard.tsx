@@ -92,8 +92,11 @@ export function HotEventCard({
       <div className="flex items-start gap-2.5">
         <RingProgress value={event.heatScore} />
         <div className="min-w-0 flex-1">
-          <p className="line-clamp-1 font-semibold text-sm leading-5">
+          <p className="font-semibold text-sm leading-5">
             {event.title}
+          </p>
+          <p className="mt-1 text-xs leading-5 text-[#555] line-clamp-2">
+            {event.summary}
           </p>
           <div className="mt-1.5 flex items-center gap-2 flex-wrap">
             <span
@@ -119,7 +122,7 @@ export function HotEventCardPopover({ event }: { event: HotEvent }) {
   return (
     <div className="absolute left-full top-0 z-50 ml-2 w-64 rounded-lg border border-[#dcd8cf] bg-white p-3 shadow-lg pointer-events-none">
       <p className="text-sm font-semibold">{event.title}</p>
-      <p className="mt-1 text-xs leading-5 text-[#555] line-clamp-3">
+      <p className="mt-1 text-xs leading-5 text-[#555]">
         {event.summary}
       </p>
       <div className="mt-2 flex flex-wrap gap-1">

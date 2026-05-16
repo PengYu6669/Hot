@@ -96,7 +96,7 @@ export function AgentPipeline({
                 )}
                 <div className="relative z-10">
                   <span className="text-[10px] text-[#999]">
-                    {done ? "✅" : `0${index + 1}`}
+                    {done ? "完成" : `0${index + 1}`}
                   </span>
                   <p
                     className={`text-[11px] font-semibold mt-0.5 ${
@@ -113,7 +113,7 @@ export function AgentPipeline({
       </div>
 
       <p className="mt-2 text-[11px] text-[#999] text-center">
-        Hover 每个环节查看 Agent 置信度和输出摘要
+        点击任一环节查看当前输出和交接结果
       </p>
     </div>
   );

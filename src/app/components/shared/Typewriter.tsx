@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 
 export function Typewriter({
   text,
@@ -15,29 +15,42 @@ export function Typewriter({
 }) {
   const [displayed, setDisplayed] = useState("");
   const [done, setDone] = useState(false);
+  const handleComplete = useEffectEvent(() => {
+    onComplete?.();
+  });
 
   useEffect(() => {
-    setDisplayed("");
-    setDone(false);
+    const resetTimer = window.setTimeout(() => {
+      setDisplayed("");
+      setDone(false);
+    }, 0);
 
     if (!text) {
-      setDone(true);
-      onComplete?.();
-      return;
+      const doneTimer = window.setTimeout(() => {
+        setDone(true);
+        handleComplete();
+      }, 0);
+      return () => {
+        window.clearTimeout(resetTimer);
+        window.clearTimeout(doneTimer);
+      };
     }
 
     let i = 0;
-    const timer = setInterval(() => {
+    const timer = window.setInterval(() => {
       i++;
       setDisplayed(text.slice(0, i));
       if (i >= text.length) {
-        clearInterval(timer);
+        window.clearInterval(timer);
         setDone(true);
-        onComplete?.();
+        handleComplete();
       }
     }, speed);
 
-    return () => clearInterval(timer);
+    return () => {
+      window.clearTimeout(resetTimer);
+      window.clearInterval(timer);
+    };
   }, [text, speed]);
 
   return (

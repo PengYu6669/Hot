@@ -83,7 +83,7 @@ export function AgentDialogue({
       {/* Conclusion */}
       <div className="rounded-lg bg-[#fbfaf7] border border-[#e8e5dd] p-3">
         <p className="text-[11px] font-bold uppercase text-[#6b6b6b] mb-1">
-          结论
+          运营判断
         </p>
         <Typewriter
           text={message.conclusion}
@@ -230,7 +230,7 @@ export function AgentDialogue({
         >
           {message.llmGenerated
             ? "Agent 学到了：你对这类内容更谨慎，该判断将作为负样本回流给评分和风控规则。"
-            : "Agent 学到了：你对这类内容更谨慎，下次会调整置信度阈值。"}
+            : "Agent 学到了：你对这类内容更谨慎，下次会先收紧同类选题。"}
         </motion.p>
       )}
       {decision === "confirmed" && typedComplete && (

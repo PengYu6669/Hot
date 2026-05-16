@@ -11,7 +11,16 @@ type ChatCompletionResponse = {
   }>;
 };
 
-const DEFAULT_TIMEOUT_MS = 12000;
+const DEFAULT_TIMEOUT_MS = 30000;
+
+export type LlmGenerationResult<T> = {
+  output: T;
+  attempted: boolean;
+  usedLlm: boolean;
+  model: string;
+  durationMs: number;
+  fallbackReason: string | null;
+};
 
 export async function generateJsonWithLlm<T>({
   system,
@@ -22,12 +31,37 @@ export async function generateJsonWithLlm<T>({
   user: string;
   fallback: T;
 }): Promise<T> {
+  const result = await generateJsonWithLlmResult({
+    system,
+    user,
+    fallback,
+  });
+  return result.output;
+}
+
+export async function generateJsonWithLlmResult<T>({
+  system,
+  user,
+  fallback,
+}: {
+  system: string;
+  user: string;
+  fallback: T;
+}): Promise<LlmGenerationResult<T>> {
+  const startedAt = Date.now();
   const apiKey = process.env.DEEPSEEK_API_KEY;
   const baseUrl = process.env.DEEPSEEK_BASE_URL;
   const model = process.env.LLM_MODEL ?? "deepseek-chat";
 
   if (!apiKey || !baseUrl) {
-    return fallback;
+    return {
+      output: fallback,
+      attempted: false,
+      usedLlm: false,
+      model,
+      durationMs: Date.now() - startedAt,
+      fallbackReason: "DEEPSEEK_API_KEY or DEEPSEEK_BASE_URL is missing",
+    };
   }
 
   try {
@@ -42,11 +76,35 @@ export async function generateJsonWithLlm<T>({
     });
 
     const content = response.choices?.[0]?.message?.content;
-    if (!content) return fallback;
+    if (!content) {
+      return {
+        output: fallback,
+        attempted: true,
+        usedLlm: false,
+        model,
+        durationMs: Date.now() - startedAt,
+        fallbackReason: "LLM response did not include message content",
+      };
+    }
 
-    return JSON.parse(extractJson(content)) as T;
-  } catch {
-    return fallback;
+    return {
+      output: JSON.parse(extractJson(content)) as T,
+      attempted: true,
+      usedLlm: true,
+      model,
+      durationMs: Date.now() - startedAt,
+      fallbackReason: null,
+    };
+  } catch (error) {
+    return {
+      output: fallback,
+      attempted: true,
+      usedLlm: false,
+      model,
+      durationMs: Date.now() - startedAt,
+      fallbackReason:
+        error instanceof Error ? error.message : "LLM request failed",
+    };
   }
 }
 

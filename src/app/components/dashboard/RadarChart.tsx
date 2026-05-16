@@ -1,8 +1,11 @@
 "use client";
 
-import { useRef } from "react";
-import ReactECharts from "echarts-for-react";
+import dynamic from "next/dynamic";
 import type { ScoreFactor } from "@/lib/hot-events";
+
+const ReactECharts = dynamic(() => import("echarts-for-react"), {
+  ssr: false,
+});
 
 const dimLabels: Record<string, string> = {
   "时效信号": "时效窗口",
@@ -18,8 +21,6 @@ export function RadarChart({
   factors: ScoreFactor[];
   className?: string;
 }) {
-  const chartRef = useRef<ReactECharts>(null);
-
   const indicators = factors.map((f) => ({
     name: dimLabels[f.label] ?? f.label,
     max: 28,
@@ -67,7 +68,6 @@ export function RadarChart({
   return (
     <div className={className}>
       <ReactECharts
-        ref={chartRef}
         option={option}
         style={{ height: 260, width: "100%" }}
         notMerge

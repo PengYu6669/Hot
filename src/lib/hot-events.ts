@@ -1,5 +1,5 @@
 import { fetchAihotItems, getSinceDate, type AihotItem } from "./aihot";
-import { generateJsonWithLlm } from "./llm";
+import { generateJsonWithLlmResult } from "./llm";
 
 export type HeatLevel = "S" | "A" | "B";
 export type LifecycleStage = "emerging" | "burst" | "mature" | "decline";
@@ -25,28 +25,61 @@ export type EventInsight = {
   contentAngle: string;
 };
 
-export type SopNode = {
-  name: string;
-  owner: string;
-  status: "done" | "running" | "pending" | "guarded";
-  input: string;
-  action: string;
-  output: string;
-};
-
-export type RoiEstimate = {
-  responseTime: string;
-  manualTimeSaved: string;
-  contentRecall: string;
-  expectedConversion: string;
-};
-
 export type CampaignBrief = {
   titles: string[];
   shortVideoScript: string;
   commentGuide: string;
   riskGuardrail: string;
   distributionPlan: string;
+};
+
+export type MonetizationPlan = {
+  trafficAsset: string;
+  conversionPath: string;
+  offer: string;
+  activation: string;
+  successMetric: string;
+};
+
+export type ReplicationPlaybook = {
+  pattern: string;
+  reusableHook: string;
+  requiredSignals: string[];
+  productionSteps: string[];
+  scaleRule: string;
+};
+
+export type DouyinOperationPlan = {
+  creatorArchetypes: string[];
+  contentFormats: string[];
+  commentOps: string;
+  trafficRule: string;
+  stopRule: string;
+  riskChecklist: string[];
+};
+
+export type AgentRunStep = {
+  id: "perceive" | "mine" | "plan" | "guard";
+  name: string;
+  input: string;
+  action: string;
+  output: string;
+  llmUsed: boolean;
+};
+
+export type AgentRun = {
+  id: string;
+  startedAt: string;
+  finishedAt: string;
+  steps: AgentRunStep[];
+};
+
+export type LlmTrace = {
+  attempted: boolean;
+  usedLlm: boolean;
+  model: string;
+  durationMs: number;
+  fallbackReason: string | null;
 };
 
 export type HotEvent = {
@@ -67,8 +100,6 @@ export type HotEvent = {
   eventTypeLabel: string;
   tags: string[];
   insight: EventInsight;
-  sop: SopNode[];
-  roi: RoiEstimate;
   reason: string;
   intervention: string;
   createdAt: string | null;
@@ -81,22 +112,28 @@ export type Strategy = {
   eventId: string;
   topicName: string;
   contentTemplate: string;
-  recommendedCreators: string[];
   trafficSuggestion: string;
-  confidence: number;
   reasoning: string;
   agentReasoning: string;
   heatAnalysis: string;
   riskAssessment: string;
+  monetizationPlan: MonetizationPlan;
+  replicationPlaybook: ReplicationPlaybook;
+  agentRun?: AgentRun;
+  llmTrace?: LlmTrace;
   llmGenerated: boolean;
   status: "pending" | "confirmed" | "modified" | "rejected";
   campaignBrief: CampaignBrief;
+  douyinOperationPlan: DouyinOperationPlan;
 };
 
 type AgentOutput = CampaignBrief & {
   reasoning: string;
   heatAnalysis: string;
   riskAssessment: string;
+  monetizationPlan: MonetizationPlan;
+  replicationPlaybook: ReplicationPlaybook;
+  douyinOperationPlan: DouyinOperationPlan;
 };
 
 export type HotEventDashboard = {
@@ -143,8 +180,10 @@ const importantKeywords = [
 
 export async function getHotEventDashboard({
   q,
+  generateSelectedStrategy = false,
 }: {
   q?: string;
+  generateSelectedStrategy?: boolean;
 } = {}): Promise<HotEventDashboard> {
   const response = await fetchAihotItems({
     mode: "selected",
@@ -159,7 +198,9 @@ export async function getHotEventDashboard({
 
   const selectedEvent = events[0] ?? null;
   const strategy = selectedEvent
-    ? await createStrategy(selectedEvent)
+    ? generateSelectedStrategy
+      ? await createStrategy(selectedEvent)
+      : createFallbackStrategy(selectedEvent)
     : null;
   const strategies = Object.fromEntries(
     events.map((event) => {
@@ -210,8 +251,6 @@ function toHotEvent(item: AihotItem): HotEvent {
     eventTypeLabel,
     tags: createTags(item, eventTypeLabel),
     insight,
-    sop: createSopNodes(heatLevel, lifecycleStage, riskLevel),
-    roi: createRoiEstimate(heatLevel, lifecycleStage),
     reason: createScoreReason(item, heatScore),
     intervention,
     createdAt: item.publishedAt,
@@ -374,70 +413,34 @@ function createIntervention(stage: LifecycleStage, level: HeatLevel) {
   return "建议只保留监控，除非出现二次传播信号。";
 }
 
-function createSopNodes(
-  level: HeatLevel,
-  stage: LifecycleStage,
-  risk: RiskLevel,
-): SopNode[] {
-  return [
-    {
-      name: "线索感知",
-      owner: "感知 Agent",
-      status: "done",
-      input: "AI HOT 精选条目",
-      action: "清洗标题、来源、摘要、发布时间",
-      output: "标准 HotEvent",
-    },
-    {
-      name: "事件挖掘",
-      owner: "分析 Agent",
-      status: "done",
-      input: "HotEvent + scoring factors",
-      action: "判断热度等级、生命周期、用户情绪",
-      output: `${level} 级 / ${getLifecycleLabel(stage)}`,
-    },
-    {
-      name: "运营策略",
-      owner: "运营 Agent",
-      status: level === "B" ? "pending" : "running",
-      input: "事件洞察 + 平台导向",
-      action: "生成标题、脚本、达人和分发建议",
-      output: "待确认策略包",
-    },
-    {
-      name: "管控复盘",
-      owner: "人工 + 复盘 Agent",
-      status: risk === "high" ? "guarded" : "pending",
-      input: "策略包 + 风险标签 + 后验指标",
-      action: "人工确认、记录采纳和转化",
-      output: "ROI 复盘样本",
-    },
-  ];
-}
-
-function createRoiEstimate(level: HeatLevel, stage: LifecycleStage): RoiEstimate {
-  const urgent = level === "S" || stage === "burst";
-  return {
-    responseTime: urgent ? "预计 15 分钟出首版方案" : "预计 30 分钟出观察方案",
-    manualTimeSaved: urgent ? "节省约 45 分钟人工选题/脚本时间" : "节省约 25 分钟人工判断时间",
-    contentRecall: urgent ? "预估召回 8-12 个可运营内容角度" : "预估召回 3-5 个低成本内容角度",
-    expectedConversion: urgent ? "策略采纳后预估转化 uplift 12%-18%" : "小流量验证后预估 uplift 5%-8%",
+export async function createStrategy(
+  event: HotEvent,
+  {
+    humanInstruction,
+    includeAgentRun = true,
+  }: {
+    humanInstruction?: string;
+    includeAgentRun?: boolean;
+  } = {},
+): Promise<Strategy> {
+  const startedAt = Date.now();
+  const normalizedInstruction = humanInstruction?.trim();
+  const fallback = createFallbackStrategy(event, normalizedInstruction);
+  const fallbackOutput: AgentOutput = {
+    titles: fallback.campaignBrief.titles,
+    shortVideoScript: fallback.campaignBrief.shortVideoScript,
+    commentGuide: fallback.campaignBrief.commentGuide,
+    riskGuardrail: fallback.campaignBrief.riskGuardrail,
+    distributionPlan: fallback.campaignBrief.distributionPlan,
+    reasoning: fallback.reasoning,
+    heatAnalysis: `热度 ${event.heatScore} 分 / ${event.heatLevel} 级，${event.lifecycleLabel}。评分：${event.scoreFactors.map((f) => `${f.label} ${f.value}/28`).join("，")}。`,
+    riskAssessment: fallback.campaignBrief.riskGuardrail,
+    monetizationPlan: fallback.monetizationPlan,
+    replicationPlaybook: fallback.replicationPlaybook,
+    douyinOperationPlan: fallback.douyinOperationPlan,
   };
-}
-
-async function createStrategy(event: HotEvent): Promise<Strategy> {
-  const fallback = createFallbackStrategy(event);
-  const output = await generateJsonWithLlm<AgentOutput>({
-    fallback: {
-      titles: fallback.campaignBrief.titles,
-      shortVideoScript: fallback.campaignBrief.shortVideoScript,
-      commentGuide: fallback.campaignBrief.commentGuide,
-      riskGuardrail: fallback.campaignBrief.riskGuardrail,
-      distributionPlan: fallback.campaignBrief.distributionPlan,
-      reasoning: fallback.reasoning,
-      heatAnalysis: `热度 ${event.heatScore} 分 / ${event.heatLevel} 级，${event.lifecycleLabel}。评分：${event.scoreFactors.map((f) => `${f.label} ${f.value}/28`).join("，")}。`,
-      riskAssessment: fallback.campaignBrief.riskGuardrail,
-    },
+  const llmResult = await generateJsonWithLlmResult<Partial<AgentOutput>>({
+    fallback: fallbackOutput,
     system: `你是 HotAgent，一个融合了事件感知、热度挖掘、策略生成、风险管控四大能力的热点运营 Agent。
 
 你的角色定义：
@@ -445,13 +448,20 @@ async function createStrategy(event: HotEvent): Promise<Strategy> {
 - 挖掘：判断事件为什么热、处于什么生命周期、运营价值多大
 - 策略：产出内容角度、标题、脚本、分发节奏
 - 管控：识别内容安全风险，标记人工确认断点
+- 增长：把热度沉淀为可复用资产和可验证转化，不停留在流量
 
 输出规则：
 - 必须输出严格 JSON，不要 Markdown 代码块，不要解释性文字
 - reasoning / heatAnalysis / riskAssessment 必须针对该事件具体内容分析，严禁套模板
+- 如果有人类运营指令，必须显式说明你如何采纳、修正或拒绝该指令
+- monetizationPlan 必须回答“热度和流量之后拿来做什么”
+- replicationPlaybook 必须回答“这类爆款以后如何复制”
+- douyinOperationPlan 必须回答“抖音化运营动作如何落地”
+- shortVideoScript 必须是可直接录成竖屏视频的分镜脚本，按 0-3s / 3-10s / 10-20s / 20-30s 分段
 - 语言克制、专业，面向运营中台场景`,
     user: JSON.stringify({
       instruction: "请以 HotAgent 身份完成全流程运营判断，输出完整 JSON。",
+      humanInstruction: normalizedInstruction || null,
       event: {
         title: event.title,
         summary: event.summary,
@@ -472,33 +482,74 @@ async function createStrategy(event: HotEvent): Promise<Strategy> {
       },
       outputFields: {
         titles: "3 个抖音风格标题",
-        shortVideoScript: "30 秒短视频脚本，三段式",
+        shortVideoScript: "30 秒竖屏脚本，按 0-3s / 3-10s / 10-20s / 20-30s 分段，包含口播和屏幕字幕",
         commentGuide: "评论区引导",
         riskGuardrail: "风险管控提示",
         distributionPlan: "分发节奏建议",
         reasoning: "完整决策推理链（200-400字）：事件背景 → 热因分析 → 价值判断 → 策略选择 → 风险考量",
         heatAnalysis: "热度四维分析（100-200字）：时效窗口 / 行业关注度 / 用户兴趣匹配 / 信源可信度",
         riskAssessment: "内容安全评估（100-150字）：敏感表述 / 事实争议 / 监管合规 / 平台调性",
+        monetizationPlan: {
+          trafficAsset: "本次热度能沉淀成什么资产",
+          conversionPath: "从曝光到转化的路径",
+          offer: "承接的产品/服务/社群/线索形态",
+          activation: "用户下一步动作",
+          successMetric: "验证是否值得加码的指标",
+        },
+        replicationPlaybook: {
+          pattern: "可复制的爆款模式",
+          reusableHook: "可复用开场钩子",
+          requiredSignals: "下次复用前必须满足的真实信号数组",
+          productionSteps: "复用生产步骤数组",
+          scaleRule: "放量或停止规则",
+        },
+        douyinOperationPlan: {
+          creatorArchetypes: "推荐创作者类型",
+          contentFormats: "内容形式组合",
+          commentOps: "评论区运营动作",
+          trafficRule: "放量/停投规则",
+          stopRule: "停止追热点的条件",
+          riskChecklist: "发布前必须检查的风险点",
+        },
       },
     }),
   });
+  const output = normalizeAgentOutput(llmResult.output, fallbackOutput);
+  const finishedAt = Date.now();
 
-  const llmGenerated = output.reasoning.length > 80;
+  const llmGenerated =
+    llmResult.usedLlm &&
+    output.reasoning !== fallbackOutput.reasoning &&
+    output.reasoning.length > 80;
 
   return {
     id: `strategy-${event.id}`,
     eventId: event.id,
     topicName: `#${event.title.replace(/[^\u4e00-\u9fa5A-Za-z0-9]/g, "").slice(0, 18)}`,
     contentTemplate: `用"发生了什么 → 为什么重要 → 普通人怎么用/怎么看"的三段式拆解「${event.title}」，结尾抛出一个可二创的问题。`,
-    recommendedCreators: getRecommendedCreators(event),
     trafficSuggestion: output.distributionPlan,
-    confidence: llmGenerated
-      ? event.heatLevel === "S" ? 0.86 : event.heatLevel === "A" ? 0.74 : 0.62
-      : event.heatLevel === "S" ? 0.78 : event.heatLevel === "A" ? 0.68 : 0.56,
     reasoning: output.reasoning,
     agentReasoning: output.reasoning,
     heatAnalysis: output.heatAnalysis,
     riskAssessment: output.riskAssessment,
+    monetizationPlan: output.monetizationPlan,
+    replicationPlaybook: output.replicationPlaybook,
+    douyinOperationPlan: output.douyinOperationPlan,
+    agentRun: includeAgentRun
+      ? createAgentRun(event, output, {
+          startedAt,
+          finishedAt,
+          llmGenerated,
+          humanInstruction: normalizedInstruction,
+        })
+      : undefined,
+    llmTrace: {
+      attempted: llmResult.attempted,
+      usedLlm: llmResult.usedLlm,
+      model: llmResult.model,
+      durationMs: llmResult.durationMs,
+      fallbackReason: llmResult.fallbackReason,
+    },
     llmGenerated,
     status: "pending",
     campaignBrief: {
@@ -511,14 +562,21 @@ async function createStrategy(event: HotEvent): Promise<Strategy> {
   };
 }
 
-function createFallbackCampaignBrief(event: HotEvent): CampaignBrief {
+function createFallbackCampaignBrief(
+  event: HotEvent,
+  humanInstruction?: string,
+): CampaignBrief {
+  const instructionPrefix = humanInstruction
+    ? `按人工指令「${humanInstruction}」调整：`
+    : "";
+
   return {
     titles: [
       `${event.title}，普通人真正该关注什么？`,
       `这个${event.eventTypeLabel}为什么突然火了`,
       `一分钟看懂：${event.title.slice(0, 18)}`,
     ],
-    shortVideoScript: `开头 3 秒点出事件：${event.title}。中段解释它为什么重要：${event.summary.slice(0, 80)}。结尾给用户一个行动建议：先关注应用场景，不要只看参数和排名。`,
+    shortVideoScript: `${instructionPrefix}0-3s｜钩子：别只看这条热点多热，先看它会影响谁。屏幕字幕「${event.title.slice(0, 18)}」。\n3-10s｜发生了什么：用一句话讲清事件——${event.summary.slice(0, 72)}。\n10-20s｜为什么重要：结合${event.lifecycleLabel}和${event.heatLevel}级热度，说明它对普通用户/创作者/企业的具体影响。\n20-30s｜抖音化收口：用一个问题引导评论——${event.eventType === "paper" ? "你想看论文应用场景，还是技术细节？" : "你更关心怎么用，还是会不会改变行业？"}`,
     commentGuide: "你更关心它的技术突破、商业机会，还是普通人的使用门槛？",
     riskGuardrail:
       event.riskLevel === "high"
@@ -531,39 +589,293 @@ function createFallbackCampaignBrief(event: HotEvent): CampaignBrief {
   };
 }
 
-function createFallbackStrategy(event: HotEvent): Strategy {
-  const campaignBrief = createFallbackCampaignBrief(event);
+function createMonetizationPlan(event: HotEvent): MonetizationPlan {
+  const baseOffer =
+    event.eventType === "paper"
+      ? "论文精读清单、技术解读直播预约、研究社群线索"
+      : event.eventType === "ai-model"
+        ? "模型测评合集、提示词模板包、企业试用咨询线索"
+        : event.eventType === "ai-product"
+          ? "工具对比表、教程合集、效率工具订阅/咨询线索"
+          : "趋势报告、行业解读专栏、私域社群入群线索";
+
+  return {
+    trafficAsset: `${event.eventTypeLabel}热点下的用户问题、评论关键词和可复用选题角度`,
+    conversionPath:
+      "短视频/图文获得曝光 → 评论区收集需求 → 私信/表单承接 → 推送清单、工具包或咨询入口 → 复盘转化质量",
+    offer: baseOffer,
+    activation:
+      event.heatLevel === "S"
+        ? "评论区置顶领取清单/模板，2 小时内用二创内容追问具体需求"
+        : "先用收藏型内容沉淀兴趣用户，再通过后续合集做低成本转化",
+    successMetric:
+      "收藏率、评论需求密度、私信/表单点击率、有效线索率，而不只看播放量",
+  };
+}
+
+function createReplicationPlaybook(event: HotEvent): ReplicationPlaybook {
+  const requiredSignals = [
+    `AI HOT 类别为「${event.eventTypeLabel}」`,
+    `热度评分达到 ${event.heatLevel === "B" ? "70+" : `${event.heatScore}+`} 或出现强关键词`,
+    "标题/摘要能回答明确用户问题",
+    "来源链接和事实边界可被核验",
+  ];
+
+  return {
+    pattern: `${event.eventTypeLabel}：发生了什么 → 为什么重要 → 普通人/企业怎么用 → 留一个可承接需求的问题`,
+    reusableHook:
+      event.eventType === "paper"
+        ? "这篇论文真正有用的不是结论，而是它可能改掉一个工作流"
+        : "这个 AI 热点别只看热闹，先看它会影响哪类人",
+    requiredSignals,
+    productionSteps: [
+      "用 AI HOT 条目确认时效、类别、来源和摘要",
+      "按四因子评分判断是否进入策略池",
+      "把内容拆成解释型首发、教程型二创、清单型承接三段",
+      "用评论需求决定是否放量或做下一条",
+      "记录有效线索和内容结构，沉淀为下一次模板",
+    ],
+    scaleRule:
+      "30-60 分钟内收藏/评论需求密度高于同类均值则加码二创；只有播放无收藏无需求则停止追热点。",
+  };
+}
+
+function createDouyinOperationPlan(event: HotEvent): DouyinOperationPlan {
+  const creatorArchetypes =
+    event.eventType === "paper"
+      ? ["技术解读型达人", "产品效率型账号", "行业观察型创作者"]
+      : event.eventType === "ai-model"
+        ? ["模型评测型达人", "AI 工具测评账号", "技术拆解型创作者"]
+        : event.eventType === "ai-product"
+          ? ["工具实测型达人", "效率提升型账号", "教程合集型创作者"]
+          : ["热点解读型账号", "行业评论型达人", "知识清单型创作者"];
+
+  const contentFormats =
+    event.heatLevel === "S"
+      ? ["30 秒解释短视频", "评论区答疑二创", "工具/观点对比卡片"]
+      : ["60 秒观点拆解", "图文清单", "热点延伸问答"];
+
+  return {
+    creatorArchetypes,
+    contentFormats,
+    commentOps:
+      event.heatLevel === "S"
+        ? "置顶一个高频问题，集中收集评论关键词，2 小时内追加二创回应。"
+        : "先用提问式评论收集关注点，若收藏和评论密度不足则不放大追投。",
+    trafficRule:
+      event.heatLevel === "S"
+        ? "先小流量验证完播与收藏，30 分钟内指标优于同类样本再扩量。"
+        : "先自然流量测试，用评论关键词和收藏率决定是否进入第二轮分发。",
+    stopRule:
+      event.lifecycleStage === "decline"
+        ? "若已进入衰退期且没有二次传播信号，直接停止追热点。"
+        : "播放有增长但收藏、评论和有效互动偏弱时，停止继续加码。",
+    riskChecklist: [
+      "来源链接可核验",
+      "事实与观点分离表达",
+      "避免夸大结论和绝对化判断",
+      "敏感、版权、监管表述先人工复核",
+    ],
+  };
+}
+
+function createFallbackStrategy(
+  event: HotEvent,
+  humanInstruction?: string,
+): Strategy {
+  const campaignBrief = createFallbackCampaignBrief(event, humanInstruction);
+  const douyinOperationPlan = createDouyinOperationPlan(event);
+  const instructionReasoning = humanInstruction
+    ? ` 已收到人工运营指令「${humanInstruction}」，当前先用本地规则生成改写版策略；如 LLM 可用，会进一步重跑生成。`
+    : "";
 
   return {
     id: `strategy-${event.id}`,
     eventId: event.id,
     topicName: `#${event.title.replace(/[^\u4e00-\u9fa5A-Za-z0-9]/g, "").slice(0, 18)}`,
     contentTemplate: `用"发生了什么 → 为什么重要 → 普通人怎么用/怎么看"的三段式拆解「${event.title}」，结尾抛出一个可二创的问题。`,
-    recommendedCreators: getRecommendedCreators(event),
     trafficSuggestion: campaignBrief.distributionPlan,
-    confidence:
-      event.heatLevel === "S" ? 0.78 : event.heatLevel === "A" ? 0.68 : 0.56,
-    reasoning: `${event.reason} ${event.intervention}`,
-    agentReasoning: `${event.reason} ${event.intervention}`,
+    reasoning: `${event.reason} ${event.intervention}${instructionReasoning}`,
+    agentReasoning: `${event.reason} ${event.intervention}${instructionReasoning}`,
     heatAnalysis: `热度 ${event.heatScore} 分 / ${event.heatLevel} 级，${event.lifecycleLabel}。基于时效、事件类型、语义强度、可信来源四项加权评分。`,
     riskAssessment: `${event.riskLevel === "high" ? "高风险事件，需人工复核来源和表述。" : event.riskLevel === "medium" ? "中等风险，注意事实与观点分离。" : "低风险，可进入常规运营流程。"}`,
+    monetizationPlan: createMonetizationPlan(event),
+    replicationPlaybook: createReplicationPlaybook(event),
+    douyinOperationPlan,
     llmGenerated: false,
     status: "pending",
     campaignBrief,
   };
 }
 
-function getRecommendedCreators(event: HotEvent) {
-  if (event.eventType === "paper") {
-    return ["@论文精读室", "@AI研究员日常", "@模型观察站"];
-  }
-  if (event.eventType === "ai-model") {
-    return ["@模型测评局", "@AI效率研究所", "@开源情报站"];
-  }
-  if (event.eventType === "ai-product") {
-    return ["@产品增长笔记", "@AI工具箱", "@创业者日报"];
-  }
-  return ["@AI商业观察", "@科技热点局", "@趋势拆解员"];
+function normalizeAgentOutput(
+  output: Partial<AgentOutput>,
+  fallback: AgentOutput,
+): AgentOutput {
+  return {
+    titles: normalizeStringArray(output.titles, fallback.titles).slice(0, 3),
+    shortVideoScript: normalizeString(
+      output.shortVideoScript,
+      fallback.shortVideoScript,
+    ),
+    commentGuide: normalizeString(output.commentGuide, fallback.commentGuide),
+    riskGuardrail: normalizeString(output.riskGuardrail, fallback.riskGuardrail),
+    distributionPlan: normalizeString(
+      output.distributionPlan,
+      fallback.distributionPlan,
+    ),
+    reasoning: normalizeString(output.reasoning, fallback.reasoning),
+    heatAnalysis: normalizeString(output.heatAnalysis, fallback.heatAnalysis),
+    riskAssessment: normalizeString(
+      output.riskAssessment,
+      fallback.riskAssessment,
+    ),
+    monetizationPlan: normalizeMonetizationPlan(
+      output.monetizationPlan,
+      fallback.monetizationPlan,
+    ),
+    replicationPlaybook: normalizeReplicationPlaybook(
+      output.replicationPlaybook,
+      fallback.replicationPlaybook,
+    ),
+    douyinOperationPlan: normalizeDouyinOperationPlan(
+      output.douyinOperationPlan,
+      fallback.douyinOperationPlan,
+    ),
+  };
+}
+
+function normalizeString(value: unknown, fallback: string) {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function normalizeStringArray(value: unknown, fallback: string[]) {
+  if (!Array.isArray(value)) return fallback;
+  const strings = value.filter(
+    (item): item is string => typeof item === "string" && item.trim().length > 0,
+  );
+  return strings.length ? strings : fallback;
+}
+
+function normalizeMonetizationPlan(
+  value: unknown,
+  fallback: MonetizationPlan,
+): MonetizationPlan {
+  if (!value || typeof value !== "object") return fallback;
+  const plan = value as Partial<Record<keyof MonetizationPlan, unknown>>;
+  return {
+    trafficAsset: normalizeString(plan.trafficAsset, fallback.trafficAsset),
+    conversionPath: normalizeString(plan.conversionPath, fallback.conversionPath),
+    offer: normalizeString(plan.offer, fallback.offer),
+    activation: normalizeString(plan.activation, fallback.activation),
+    successMetric: normalizeString(plan.successMetric, fallback.successMetric),
+  };
+}
+
+function normalizeReplicationPlaybook(
+  value: unknown,
+  fallback: ReplicationPlaybook,
+): ReplicationPlaybook {
+  if (!value || typeof value !== "object") return fallback;
+  const playbook = value as Partial<Record<keyof ReplicationPlaybook, unknown>>;
+  return {
+    pattern: normalizeString(playbook.pattern, fallback.pattern),
+    reusableHook: normalizeString(playbook.reusableHook, fallback.reusableHook),
+    requiredSignals: normalizeStringArray(
+      playbook.requiredSignals,
+      fallback.requiredSignals,
+    ),
+    productionSteps: normalizeStringArray(
+      playbook.productionSteps,
+      fallback.productionSteps,
+    ),
+    scaleRule: normalizeString(playbook.scaleRule, fallback.scaleRule),
+  };
+}
+
+function normalizeDouyinOperationPlan(
+  value: unknown,
+  fallback: DouyinOperationPlan,
+): DouyinOperationPlan {
+  if (!value || typeof value !== "object") return fallback;
+  const plan = value as Partial<Record<keyof DouyinOperationPlan, unknown>>;
+  return {
+    creatorArchetypes: normalizeStringArray(
+      plan.creatorArchetypes,
+      fallback.creatorArchetypes,
+    ),
+    contentFormats: normalizeStringArray(
+      plan.contentFormats,
+      fallback.contentFormats,
+    ),
+    commentOps: normalizeString(plan.commentOps, fallback.commentOps),
+    trafficRule: normalizeString(plan.trafficRule, fallback.trafficRule),
+    stopRule: normalizeString(plan.stopRule, fallback.stopRule),
+    riskChecklist: normalizeStringArray(
+      plan.riskChecklist,
+      fallback.riskChecklist,
+    ),
+  };
+}
+
+function createAgentRun(
+  event: HotEvent,
+  output: AgentOutput,
+  {
+    startedAt,
+    finishedAt,
+    llmGenerated,
+    humanInstruction,
+  }: {
+    startedAt: number;
+    finishedAt: number;
+    llmGenerated: boolean;
+    humanInstruction?: string;
+  },
+): AgentRun {
+  const steps: AgentRunStep[] = [
+    {
+      id: "perceive",
+      name: "感知 Agent",
+      input: "AI HOT public API 条目",
+      action: "清洗标题、来源、摘要、发布时间和分类",
+      output: `生成 HotEvent：${event.sourceName} / ${event.publishedLabel}`,
+      llmUsed: false,
+    },
+    {
+      id: "mine",
+      name: "挖掘 Agent",
+      input: "HotEvent + 四因子评分规则",
+      action: "计算热度、生命周期、运营价值和风险",
+      output: output.heatAnalysis,
+      llmUsed: false,
+    },
+    {
+      id: "plan",
+      name: "策略/增长 Agent",
+      input: humanInstruction
+        ? `事件洞察 + 人工指令：${humanInstruction}`
+        : "事件洞察 + 平台导向 + 变现目标",
+      action: "生成内容策略、承接路径和爆款复用方法",
+      output: output.reasoning,
+      llmUsed: llmGenerated,
+    },
+    {
+      id: "guard",
+      name: "管控 Agent",
+      input: "策略包 + 风险标签",
+      action: "检查事实边界、夸张表达和人工断点",
+      output: output.riskAssessment,
+      llmUsed: llmGenerated,
+    },
+  ];
+
+  return {
+    id: `run-${event.id}-${finishedAt}`,
+    startedAt: new Date(startedAt).toISOString(),
+    finishedAt: new Date(finishedAt).toISOString(),
+    steps,
+  };
 }
 
 function createMetrics(events: HotEvent[]) {

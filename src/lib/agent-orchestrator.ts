@@ -48,6 +48,12 @@ export type AgentRunEvent =
       reason: string;
     }
   | {
+      type: "llm_token";
+      runId: string;
+      agentId: AgentNodeId;
+      token: string;
+    }
+  | {
       type: "strategy_ready";
       runId: string;
       strategy: Strategy;
@@ -83,6 +89,7 @@ type AgentContext = {
   historicalCase: string;
   strategy: Strategy | null;
   status: OperationTaskStatus;
+  previousStrategy: Strategy | null;
 };
 
 const agents: Record<AgentNodeId, AgentDefinition> = {
@@ -129,11 +136,13 @@ export async function runHotEventAgents({
   instruction,
   mode,
   onEvent,
+  previousStrategy,
 }: {
   event: HotEvent;
   instruction?: string;
   mode: AgentRunMode;
   onEvent: (event: AgentRunEvent) => void;
+  previousStrategy?: Strategy | null;
 }) {
   const startedAt = Date.now();
   const context: AgentContext = {
@@ -145,6 +154,7 @@ export async function runHotEventAgents({
     historicalCase: "",
     strategy: null,
     status: "processing",
+    previousStrategy: previousStrategy ?? null,
   };
 
   onEvent({
@@ -254,6 +264,15 @@ async function runNode(
     const toolStartedAt = Date.now();
     const strategy = await createStrategy(context.event, {
       humanInstruction: context.instruction,
+      previousStrategy: context.previousStrategy,
+      onToken: (token) => {
+        onEvent({
+          type: "llm_token",
+          runId: context.runId,
+          agentId: node,
+          token,
+        });
+      },
     });
     context.strategy = strategy;
     const llmTrace = strategy.llmTrace;

@@ -3,12 +3,14 @@ import {
   type AgentRunEvent,
   type AgentRunMode,
 } from "@/lib/agent-orchestrator";
-import type { HotEvent } from "@/lib/hot-events";
+import type { HotEvent, Strategy } from "@/lib/hot-events";
 
 type AgentRunRequest = {
   event?: HotEvent;
   instruction?: string;
   mode?: AgentRunMode;
+  previousStrategy?: Strategy | null;
+  conversationHistory?: { role: string; content: string }[];
 };
 
 export async function POST(request: Request) {
@@ -32,6 +34,7 @@ export async function POST(request: Request) {
             instruction: body.instruction,
             mode: body.mode ?? "standard",
             onEvent: send,
+            previousStrategy: body.previousStrategy,
           });
         } catch (error) {
           const message =

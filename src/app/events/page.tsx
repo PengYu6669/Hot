@@ -1,429 +1,551 @@
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
 import { AppShell } from "../app-shell";
-import { getHotEventDashboard } from "@/lib/hot-events";
+import type { HotEventDashboard, Strategy } from "@/lib/hot-events";
 import { HeatGauge } from "../components/detail/HeatGauge";
 import { LifecycleTimeline } from "../components/detail/LifecycleTimeline";
 import { RiskBlock } from "../components/detail/RiskBlock";
 import { FactorWaterfall } from "../components/detail/FactorWaterfall";
-import type { ReactNode } from "react";
+import { HeatTrendChart } from "../components/detail/HeatTrendChart";
+import { computeTrendData } from "@/lib/trend-utils";
+import { StrategyCard } from "../components/agent/StrategyCard";
+import {
+  generateSOPMatch,
+  generateRiskWarnings,
+} from "@/lib/agent-helpers";
+import {
+  ArrowUpRight,
+  Loader2,
+  Zap,
+  Clock,
+  Shield,
+  TrendingUp,
+  ChevronDown,
+  ChevronUp,
+  Brain,
+  CheckCircle2,
+} from "lucide-react";
 
-export default async function EventsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ id?: string }>;
-}) {
-  const [{ id }, dashboard] = await Promise.all([
-    searchParams,
-    getHotEventDashboard(),
-  ]);
-  const event =
-    dashboard.events.find((item) => item.id === id) ??
-    dashboard.selectedEvent ??
-    dashboard.events[0];
-  const strategy = event ? dashboard.strategies[event.id] : null;
+type DetailTab = "factors" | "insights";
+type StrategyTab = "content" | "douyin" | "funnel";
+
+type AgentProgress = {
+  agentName: string;
+  agentStep: number;
+  totalSteps: number;
+  messages: string[];
+};
+
+export default function EventsPage() {
+  const [dashboard, setDashboard] = useState<HotEventDashboard | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isAdopting, setIsAdopting] = useState(false);
+  const [adoptedStrategy, setAdoptedStrategy] = useState<Strategy | null>(null);
+  const [adoptError, setAdoptError] = useState<string | null>(null);
+  const [detailTab, setDetailTab] = useState<DetailTab>("factors");
+  const [strategyTab, setStrategyTab] = useState<StrategyTab>("content");
+  const [strategyOpen, setStrategyOpen] = useState(true);
+  const [agentProgress, setAgentProgress] = useState<AgentProgress | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const targetId = params.get("id") || undefined;
+
+    fetch("/api/hot-events")
+      .then((res) => {
+        if (!res.ok) throw new Error("加载失败");
+        return res.json();
+      })
+      .then((data: HotEventDashboard) => {
+        // If a specific event id was requested, find it in the results
+        if (targetId) {
+          const found = data.events.find((e: { id: string }) => e.id === targetId);
+          if (found) {
+            data = { ...data, selectedEvent: found };
+          }
+        }
+        setDashboard(data);
+        setLoading(false);
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "加载失败");
+        setLoading(false);
+      });
+  }, []);
+
+  const handleAdopt = useCallback(async () => {
+    if (!dashboard?.selectedEvent && !dashboard?.events[0]) return;
+    const event = dashboard?.selectedEvent ?? dashboard?.events[0];
+    if (!event) return;
+
+    setIsAdopting(true);
+    setAdoptError(null);
+    setAgentProgress({ agentName: "感知 Agent", agentStep: 0, totalSteps: 6, messages: [] });
+
+    try {
+      const response = await fetch("/api/hot-events/agent-run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          event,
+          instruction: "生成运营策略方案",
+          mode: "standard",
+        }),
+      });
+
+      if (!response.ok) throw new Error("Agent 启动失败");
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No stream");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
+
+        for (const chunk of chunks) {
+          const data = chunk
+            .split("\n")
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.replace(/^data:\s?/, ""))
+            .join("");
+          if (!data) continue;
+
+          try {
+            const parsed = JSON.parse(data);
+
+            if (parsed.type === "agent_started") {
+              const stepIndex = ["perceive", "research", "mine", "plan", "guard", "dispatch"].indexOf(parsed.agent.id);
+              setAgentProgress((prev) => ({
+                agentName: parsed.agent.name,
+                agentStep: stepIndex >= 0 ? stepIndex + 1 : (prev?.agentStep ?? 0),
+                totalSteps: 6,
+                messages: prev?.messages ?? [],
+              }));
+            } else if (parsed.type === "agent_message") {
+              setAgentProgress((prev) =>
+                prev
+                  ? { ...prev, messages: [...prev.messages, parsed.content].slice(-3) }
+                  : prev,
+              );
+            } else if (parsed.type === "strategy_ready" && parsed.strategy) {
+              setAdoptedStrategy(parsed.strategy);
+              setStrategyOpen(true);
+            }
+          } catch {
+            // Skip parse errors for individual chunks
+          }
+        }
+      }
+    } catch (err) {
+      setAdoptError(err instanceof Error ? err.message : "生成失败");
+    } finally {
+      setIsAdopting(false);
+      setAgentProgress(null);
+    }
+  }, [dashboard]);
+
+  if (loading) {
+    return (
+      <AppShell eyebrow="Event Detail" title="事件详情">
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="size-6 animate-spin text-[#999]" />
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (error || !dashboard) {
+    return (
+      <AppShell eyebrow="Event Detail" title="事件详情">
+        <div className="rounded-lg border border-[#dcd8cf] bg-white p-8 text-center text-[#999]">
+          {error || "未找到匹配事件，请从工作台选择"}
+        </div>
+      </AppShell>
+    );
+  }
+
+  const event = dashboard.selectedEvent ?? dashboard.events[0];
+  if (!event) {
+    return (
+      <AppShell eyebrow="Event Detail" title="事件详情">
+        <div className="rounded-lg border border-[#dcd8cf] bg-white p-8 text-center text-[#999]">
+          未找到匹配事件，请从工作台选择
+        </div>
+      </AppShell>
+    );
+  }
+
+  const strategy = adoptedStrategy ?? dashboard.strategies[event.id] ?? null;
+  const sopMatch = generateSOPMatch(event, strategy);
+  const riskWarnings = generateRiskWarnings(event);
+  const trendData = computeTrendData(event.heatScore, event.lifecycleStage);
+  const predictedPeak = trendData
+    .filter((d) => d.predicted)
+    .reduce((max, d) => Math.max(max, d.value), 0);
 
   return (
-    <AppShell eyebrow="Event Detail" title="单事件看清楚">
-      {event ? (
-        <div className="grid gap-3">
-          <section className="rounded-lg border border-[#dcd8cf] bg-white p-4 shadow-sm">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold text-[#666]">
-                  <Badge>{event.sourceName}</Badge>
-                  <Badge>{event.eventTypeLabel}</Badge>
-                  <Badge>{event.lifecycleLabel}</Badge>
-                  <Badge>{event.riskLabel} 风险</Badge>
-                  <Badge>{event.publishedLabel}</Badge>
-                </div>
-                <h2 className="mt-3 text-2xl font-semibold leading-tight md:text-3xl">
-                  {event.title}
-                </h2>
-                <p className="mt-2 max-w-4xl text-sm leading-6 text-[#444]">
-                  {event.summary}
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Pill kind="hot">看清楚：{event.reason}</Pill>
-                  <Pill kind="soft">{event.intervention}</Pill>
-                </div>
-              </div>
-
-              <div className="grid gap-2 sm:grid-cols-2 xl:w-[360px]">
-                <MetricTile
-                  label="热度"
-                  value={`${event.heatScore}`}
-                  hint={`${event.heatLevel} 级`}
-                />
-                <MetricTile
-                  label="生命周期"
-                  value={event.lifecycleLabel}
-                  hint="窗口判断"
-                />
-                <MetricTile
-                  label="风险"
-                  value={event.riskLabel}
-                  hint="发布前复核"
-                />
-                <MetricTile
-                  label="来源"
-                  value={event.source}
-                  hint={event.sourceName}
-                />
-              </div>
+    <AppShell eyebrow="Event Detail" title="事件详情">
+      <div className="grid gap-4">
+        {/* ── Header: event title + stat bar ── */}
+        <section className="rounded-xl border border-[#dcd8cf] bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <h2 className="text-xl md:text-2xl font-semibold leading-snug text-[#111]">
+                {event.title}
+              </h2>
+              <p className="mt-1.5 text-sm leading-relaxed text-[#555] line-clamp-2">
+                {event.summary}
+              </p>
             </div>
-          </section>
+            {event.sourceUrl && (
+              <a
+                href={event.sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="shrink-0 inline-flex items-center gap-1 text-xs text-[#3b82f6] hover:underline"
+              >
+                查看原文 <ArrowUpRight className="size-3" />
+              </a>
+            )}
+          </div>
 
-          <section className="grid gap-3 lg:grid-cols-[1.08fr_0.92fr]">
-            <div className="grid gap-3">
-              <section className="rounded-lg border border-[#dcd8cf] bg-white p-4 shadow-sm">
-                <SectionHeader
-                  eyebrow="Heat / Lifecycle / Risk"
-                  title="热点态势"
-                  meta="单屏看热度、窗口和风险边界"
-                />
-                <div className="mt-3 grid gap-3 xl:grid-cols-[0.92fr_1.08fr]">
-                  <div className="rounded-lg border border-[#e8e5dd] bg-[#fbfaf7] p-3">
-                    <HeatGauge
-                      value={event.heatScore}
-                      level={event.heatLevel}
-                    />
-                  </div>
-                  <div className="grid gap-3">
-                    <div className="rounded-lg border border-[#e8e5dd] bg-[#fbfaf7] p-3">
-                      <LifecycleTimeline current={event.lifecycleStage} />
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <StatChip
+              icon={<Zap className="size-3" />}
+              label="热度"
+              value={`${event.heatScore} 分`}
+              accent={event.heatLevel === "S" ? "red" : event.heatLevel === "A" ? "orange" : "neutral"}
+            />
+            <StatChip
+              icon={<TrendingUp className="size-3" />}
+              label={event.heatLevel}
+              value="级"
+              accent="neutral"
+            />
+            <StatChip
+              icon={<Clock className="size-3" />}
+              label={event.lifecycleLabel}
+              value={event.publishedLabel}
+              accent="neutral"
+            />
+            <StatChip
+              icon={<Shield className="size-3" />}
+              label="风险"
+              value={event.riskLabel}
+              accent={event.riskLevel === "high" ? "red" : event.riskLevel === "medium" ? "orange" : "green"}
+            />
+            <span className="text-[11px] text-[#999]">{event.sourceName} · {event.eventTypeLabel}</span>
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            <span className="inline-flex items-center rounded-full border border-[#f0a060]/40 bg-[#fff7ed] px-3 py-1 text-xs font-medium text-[#b85b12]">
+              {event.reason}
+            </span>
+            <span className="inline-flex items-center rounded-full border border-[#e8e5dd] bg-[#fbfaf7] px-3 py-1 text-xs text-[#555]">
+              {event.intervention}
+            </span>
+          </div>
+        </section>
+
+        {/* ── Main: 2-column layout ── */}
+        <div className="grid gap-4 lg:grid-cols-[1fr_0.42fr]">
+          {/* LEFT: Trend + details */}
+          <div className="grid gap-4 content-start">
+            {/* Trend chart */}
+            <section className="rounded-xl border border-[#dcd8cf] bg-white p-5 shadow-sm">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-[#111]">热度趋势</h3>
+                <span className="text-[11px] text-[#999]">历史 + 预测</span>
+              </div>
+              <HeatTrendChart
+                data={trendData}
+                currentValue={event.heatScore}
+                heatLevel={event.heatLevel}
+                predictedPeak={predictedPeak}
+                predictedPeakTime="2小时后"
+              />
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-lg border border-[#e8e6df] bg-[#fbfaf7] p-3">
+                  <HeatGauge value={event.heatScore} level={event.heatLevel} />
+                </div>
+                <div className="rounded-lg border border-[#e8e6df] bg-[#fbfaf7] p-3">
+                  <LifecycleTimeline current={event.lifecycleStage} />
+                </div>
+                <RiskBlock level={event.riskLevel} />
+              </div>
+            </section>
+
+            {/* Tabbed detail: Factors | Insights */}
+            <section className="rounded-xl border border-[#dcd8cf] bg-white shadow-sm">
+              <div className="flex border-b border-[#e8e6df]">
+                {([
+                  ["factors", "热度因子"],
+                  ["insights", "运营洞察"],
+                ] as const).map(([key, label]) => (
+                  <button
+                    key={key}
+                    className={`flex-1 px-4 py-3 text-xs font-semibold transition-colors ${
+                      detailTab === key
+                        ? "border-b-2 border-[#111] text-[#111]"
+                        : "text-[#999] hover:text-[#555]"
+                    }`}
+                    onClick={() => setDetailTab(key)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="p-4">
+                {detailTab === "factors" ? (
+                  <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
+                    <FactorWaterfall factors={event.scoreFactors} />
+                    <div className="text-sm text-[#555] leading-6 space-y-3">
+                      <p><span className="font-semibold text-[#333]">平台导向</span><br />{event.insight.platformDirection}</p>
+                      <p><span className="font-semibold text-[#333]">运营目标</span><br />{event.insight.operationGoal}</p>
+                      <p><span className="font-semibold text-[#333]">内容角度</span><br />{event.insight.contentAngle}</p>
+                      <p><span className="font-semibold text-[#333]">用户情绪</span><br />{event.insight.userEmotion}</p>
                     </div>
-                    <RiskBlock level={event.riskLevel} />
                   </div>
-                </div>
-              </section>
-
-              <section className="rounded-lg border border-[#dcd8cf] bg-white p-4 shadow-sm">
-                <SectionHeader
-                  eyebrow="Scoring"
-                  title="热度因子与运营判断"
-                  meta="把分数翻译成动作，不把页面做成日志墙"
-                />
-                <div className="mt-3 grid gap-3 xl:grid-cols-[1.08fr_0.92fr]">
-                  <FactorWaterfall factors={event.scoreFactors} />
-                  <div className="grid gap-2">
-                    <DenseBlock
-                      label="平台导向"
-                      value={event.insight.platformDirection}
-                    />
-                    <DenseBlock
-                      label="运营目标"
-                      value={event.insight.operationGoal}
-                    />
-                    <DenseBlock
-                      label="内容角度"
-                      value={event.insight.contentAngle}
-                    />
-                    <DenseBlock
-                      label="用户情绪"
-                      value={event.insight.userEmotion}
-                    />
-                    <div className="rounded-lg border border-[#e8e5dd] bg-[#fbfaf7] p-3">
-                      <p className="text-[11px] font-semibold uppercase text-[#707070]">
-                        介入建议
-                      </p>
-                      <p className="mt-1 text-sm leading-6 text-[#333]">
-                        {event.intervention}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </section>
-            </div>
-
-            <aside className="grid gap-3">
-              <section className="rounded-lg border border-[#dcd8cf] bg-white p-4 shadow-sm">
-                <SectionHeader
-                  eyebrow="Insight"
-                  title="事件画像"
-                  meta="把事件边界压成可扫读信息"
-                />
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  <MiniField label="事件类型" value={event.eventTypeLabel} />
-                  <MiniField label="热度等级" value={event.heatLevel} />
-                  <MiniField label="生命周期" value={event.lifecycleLabel} />
-                  <MiniField label="风险等级" value={event.riskLabel} />
-                </div>
-                <div className="mt-3 grid gap-2">
-                  {event.tags.map((tag) => (
-                    <div
-                      key={tag}
-                      className="flex items-center justify-between rounded-lg border border-[#e8e5dd] bg-[#fbfaf7] px-3 py-2 text-sm"
-                    >
-                      <span className="font-medium text-[#222]">{tag}</span>
-                      <span className="text-[11px] text-[#888]">标签</span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section className="rounded-lg border border-[#dcd8cf] bg-white p-4 shadow-sm">
-                <SectionHeader
-                  eyebrow="Source"
-                  title="来源与摘要"
-                  meta="先看信源，再决定要不要追"
-                />
-                <div className="mt-3 grid gap-2 text-sm leading-6 text-[#333]">
-                  <DenseBlock label="信源" value={event.sourceName} />
-                  <DenseBlock label="原文链接" value={event.sourceUrl} />
-                  <DenseBlock label="原始摘要" value={event.summary} />
-                </div>
-              </section>
-            </aside>
-          </section>
-
-          {strategy ? (
-            <section className="rounded-lg border border-[#dcd8cf] bg-white p-4 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <SectionHeader
-                  eyebrow="Strategy"
-                  title="运营方案"
-                  meta="脚本、动作、风控和承接放在同一层"
-                />
-                {strategy.llmGenerated ? (
-                  <span className="rounded-full border border-green-200 bg-green-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-green-700">
-                    LLM
-                  </span>
                 ) : (
-                  <span className="rounded-full border border-[#e8e5dd] bg-[#fbfaf7] px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-[#777]">
-                    Fallback
-                  </span>
+                  <div className="space-y-3">
+                    <div className="rounded-lg bg-[#fbfaf7] p-4">
+                      <p className="text-xs font-semibold text-[#999] uppercase mb-2">介入建议</p>
+                      <p className="text-sm text-[#333] leading-relaxed">{event.intervention}</p>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2 text-xs text-[#666]">
+                      <div>信源 <span className="text-[#333] font-medium">{event.sourceName}</span></div>
+                      <div>类型 <span className="text-[#333] font-medium">{event.eventTypeLabel}</span></div>
+                      <div>标签 <span className="text-[#333] font-medium">{event.tags.join(" · ")}</span></div>
+                      <div>链接 <a href={event.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[#3b82f6] hover:underline truncate block">{event.sourceUrl}</a></div>
+                    </div>
+                  </div>
                 )}
               </div>
+            </section>
+          </div>
 
-              <div className="mt-3 grid gap-3 xl:grid-cols-[1.1fr_0.9fr]">
-                <div className="grid gap-3">
-                  <div className="rounded-lg border border-[#e8e5dd] bg-[#fbfaf7] p-3">
-                    <p className="text-[11px] font-semibold uppercase text-[#707070]">
-                      标题
+          {/* RIGHT: Strategy + progress */}
+          <aside className="grid gap-4 content-start">
+            {/* Streaming progress (shown during Agent run) */}
+            {isAdopting && agentProgress && (
+              <section className="rounded-xl border-2 border-blue-200 bg-gradient-to-br from-blue-50/90 to-white p-4 shadow-lg max-h-[260px] overflow-hidden">
+                <div className="flex items-center gap-2 mb-3">
+                  <Loader2 className="size-4 animate-spin text-blue-600 shrink-0" />
+                  <p className="text-xs font-semibold text-blue-700">
+                    Agent 协同运行中
+                  </p>
+                  <span className="text-[10px] text-blue-400 ml-auto shrink-0">
+                    {agentProgress.agentStep}/{agentProgress.totalSteps}
+                  </span>
+                </div>
+
+                {/* Step progress bar */}
+                <div className="flex gap-1 mb-3">
+                  {Array.from({ length: agentProgress.totalSteps }).map((_, i) => (
+                    <div
+                      key={i}
+                      className={`h-1 flex-1 rounded-full transition-colors ${
+                        i < agentProgress.agentStep
+                          ? "bg-blue-500"
+                          : i === agentProgress.agentStep
+                            ? "bg-blue-300 animate-pulse"
+                            : "bg-blue-100"
+                      }`}
+                    />
+                  ))}
+                </div>
+
+                {/* Current agent */}
+                <p className="text-xs font-semibold text-[#333]">
+                  {agentProgress.agentName}
+                </p>
+
+                {/* Agent 执行日志 */}
+                {agentProgress.messages.length > 0 && (
+                  <div className="mt-2 rounded-lg border border-blue-100 bg-white p-2.5 max-h-28 overflow-y-auto">
+                    <p className="text-[10px] text-[#999] mb-1.5 flex items-center gap-1">
+                      <Brain className="size-3" />
+                      Agent 执行日志
                     </p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {strategy.campaignBrief.titles.map((title) => (
-                        <span
-                          key={title}
-                          className="rounded-full border border-[#e8e5dd] bg-white px-3 py-1.5 text-sm leading-5 text-[#222]"
+                    <div className="space-y-1">
+                      {agentProgress.messages.map((msg, i) => (
+                        <p
+                          key={i}
+                          className="text-[11px] text-[#555] leading-relaxed border-l-2 border-blue-200 pl-2"
                         >
-                          {title}
-                        </span>
+                          {msg}
+                        </p>
                       ))}
                     </div>
                   </div>
+                )}
+              </section>
+            )}
 
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <DenseBlock
-                      label="脚本"
-                      value={strategy.campaignBrief.shortVideoScript}
-                    />
-                    <DenseBlock
-                      label="风险边界"
-                      value={strategy.campaignBrief.riskGuardrail}
-                    />
-                  </div>
-
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <DenseBlock
-                      label="热度分析"
-                      value={strategy.heatAnalysis}
-                    />
-                    <DenseBlock
-                      label="风险评估"
-                      value={strategy.riskAssessment}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid gap-3">
-                  <div className="rounded-lg border border-[#e8e5dd] bg-[#fbfaf7] p-3">
-                    <p className="text-[11px] font-semibold uppercase text-[#707070]">
-                      抖音化运营动作
-                    </p>
-                    <div className="mt-2 grid gap-2 text-sm leading-6 text-[#333]">
-                      <CompactKV
-                        label="达人类型"
-                        value={strategy.douyinOperationPlan.creatorArchetypes.join("、")}
-                      />
-                      <CompactKV
-                        label="内容形式"
-                        value={strategy.douyinOperationPlan.contentFormats.join("、")}
-                      />
-                      <CompactKV
-                        label="放量 / 停投"
-                        value={`${strategy.douyinOperationPlan.trafficRule} ${strategy.douyinOperationPlan.stopRule}`}
-                      />
-                      <CompactKV
-                        label="风险审核"
-                        value={strategy.douyinOperationPlan.riskChecklist.join("；")}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border border-[#e8e5dd] bg-[#fbfaf7] p-3">
-                    <p className="text-[11px] font-semibold uppercase text-[#707070]">
-                      承接与复用
-                    </p>
-                    <div className="mt-2 grid gap-2 text-sm leading-6 text-[#333]">
-                      <CompactKV
-                        label="流量资产"
-                        value={strategy.monetizationPlan.trafficAsset}
-                      />
-                      <CompactKV
-                        label="转化路径"
-                        value={strategy.monetizationPlan.conversionPath}
-                      />
-                      <CompactKV
-                        label="承接产品"
-                        value={strategy.monetizationPlan.offer}
-                      />
-                      <CompactKV
-                        label="复盘指标"
-                        value={strategy.monetizationPlan.successMetric}
-                      />
-                      <CompactKV
-                        label="复制方法"
-                        value={strategy.replicationPlaybook.pattern}
-                      />
-                      <CompactKV
-                        label="放量规则"
-                        value={strategy.replicationPlaybook.scaleRule}
-                      />
-                    </div>
-                  </div>
-                </div>
+            {/* Done indicator */}
+            {!isAdopting && strategy && strategy.llmGenerated && (
+              <div className="rounded-lg border border-green-200 bg-green-50 p-3 flex items-center gap-2">
+                <CheckCircle2 className="size-4 text-green-600" />
+                <p className="text-xs font-semibold text-green-700">Agent 策略生成完成</p>
               </div>
-            </section>
-          ) : null}
+            )}
+
+            {/* Strategy card */}
+            {!isAdopting && (
+              <StrategyCard
+                sopMatch={sopMatch}
+                riskWarnings={riskWarnings}
+                hasStrategy={!!strategy && strategy.llmGenerated}
+                isAdopting={isAdopting}
+                onAdopt={handleAdopt}
+              />
+            )}
+            {adoptError && (
+              <p className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+                {adoptError}
+              </p>
+            )}
+          </aside>
         </div>
-      ) : null}
+
+        {/* ── Strategy detail (collapsible) ── */}
+        {strategy && (
+          <section className="rounded-xl border border-[#dcd8cf] bg-white shadow-sm">
+            <button
+              className="w-full flex items-center justify-between p-4 text-left"
+              onClick={() => setStrategyOpen(!strategyOpen)}
+            >
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold text-[#111]">运营方案</h3>
+                {strategy.llmGenerated ? (
+                  <span className="rounded bg-green-100 text-green-700 px-1.5 py-0.5 text-[10px] font-bold">LLM</span>
+                ) : (
+                  <span className="rounded bg-[#f0f0ec] text-[#777] px-1.5 py-0.5 text-[10px] font-bold">规则</span>
+                )}
+              </div>
+              {strategyOpen ? <ChevronUp className="size-4 text-[#999]" /> : <ChevronDown className="size-4 text-[#999]" />}
+            </button>
+
+            {strategyOpen && (
+              <>
+                <div className="flex border-b border-[#e8e6df] px-4">
+                  {([
+                    ["content", "内容策略"],
+                    ["douyin", "抖音运营"],
+                    ["funnel", "承接复用"],
+                  ] as const).map(([key, label]) => (
+                    <button
+                      key={key}
+                      className={`px-4 py-2.5 text-xs font-semibold transition-colors ${
+                        strategyTab === key
+                          ? "border-b-2 border-[#111] text-[#111]"
+                          : "text-[#999] hover:text-[#555]"
+                      }`}
+                      onClick={() => setStrategyTab(key)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="p-4">
+                  {strategyTab === "content" && (
+                    <div className="grid gap-4 lg:grid-cols-2">
+                      <div>
+                        <p className="text-[11px] font-semibold text-[#999] uppercase mb-2">备选标题</p>
+                        <div className="flex flex-wrap gap-2">
+                          {strategy.campaignBrief.titles.map((t) => (
+                            <span key={t} className="rounded-full border border-[#e8e6df] bg-white px-3 py-1.5 text-xs text-[#333]">
+                              {t}
+                            </span>
+                          ))}
+                        </div>
+                        <p className="text-[11px] font-semibold text-[#999] uppercase mt-4 mb-2">短视频脚本</p>
+                        <p className="text-xs text-[#555] leading-relaxed whitespace-pre-wrap max-h-52 overflow-y-auto">
+                          {strategy.campaignBrief.shortVideoScript}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-semibold text-[#999] uppercase mb-2">决策推理</p>
+                        <p className="text-xs text-[#555] leading-relaxed">{strategy.reasoning}</p>
+                        <p className="text-[11px] font-semibold text-[#999] uppercase mt-4 mb-2">风险管控</p>
+                        <p className="text-xs text-[#555] leading-relaxed">{strategy.campaignBrief.riskGuardrail}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {strategyTab === "douyin" && (
+                    <div className="grid gap-3 sm:grid-cols-2 text-xs">
+                      <KV label="达人类型" value={strategy.douyinOperationPlan.creatorArchetypes.join("、")} />
+                      <KV label="内容形式" value={strategy.douyinOperationPlan.contentFormats.join("、")} />
+                      <KV label="放量规则" value={strategy.douyinOperationPlan.trafficRule} />
+                      <KV label="停投条件" value={strategy.douyinOperationPlan.stopRule} />
+                      <KV label="评论运营" value={strategy.douyinOperationPlan.commentOps} />
+                      <KV label="审核清单" value={strategy.douyinOperationPlan.riskChecklist.join("；")} />
+                    </div>
+                  )}
+
+                  {strategyTab === "funnel" && (
+                    <div className="grid gap-3 sm:grid-cols-2 text-xs">
+                      <KV label="流量资产" value={strategy.monetizationPlan.trafficAsset} />
+                      <KV label="转化路径" value={strategy.monetizationPlan.conversionPath} />
+                      <KV label="承接产品" value={strategy.monetizationPlan.offer} />
+                      <KV label="激活动作" value={strategy.monetizationPlan.activation} />
+                      <KV label="成功指标" value={strategy.monetizationPlan.successMetric} />
+                      <KV label="复制方法" value={strategy.replicationPlaybook.pattern} />
+                      <KV label="放量规则" value={strategy.replicationPlaybook.scaleRule} />
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </section>
+        )}
+      </div>
     </AppShell>
   );
 }
 
-function SectionHeader({
-  eyebrow,
-  title,
-  meta,
+function StatChip({
+  icon,
+  label,
+  value,
+  accent,
 }: {
-  eyebrow: string;
-  title: string;
-  meta?: string;
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  accent: "red" | "orange" | "green" | "neutral";
 }) {
+  const accentColor =
+    accent === "red" ? "text-red-600 bg-red-50 border-red-200" :
+    accent === "orange" ? "text-orange-600 bg-orange-50 border-orange-200" :
+    accent === "green" ? "text-green-600 bg-green-50 border-green-200" :
+    "text-[#555] bg-[#fbfaf7] border-[#e8e6df]";
+
   return (
-    <div className="min-w-0">
-      <p className="text-[10px] font-bold uppercase tracking-wide text-[#707070]">
-        {eyebrow}
-      </p>
-      <div className="mt-1 flex flex-wrap items-baseline gap-2">
-        <h2 className="text-base font-semibold md:text-lg">{title}</h2>
-        {meta ? (
-          <span className="text-[11px] text-[#888]">{meta}</span>
-        ) : null}
-      </div>
+    <div className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 ${accentColor}`}>
+      <span className="shrink-0">{icon}</span>
+      <span className="text-[11px] font-semibold">{label}</span>
+      <span className="text-[11px] opacity-70">{value}</span>
     </div>
   );
 }
 
-function MetricTile({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: string;
-  hint: string;
-}) {
+function KV({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-[#e8e5dd] bg-[#fbfaf7] p-3">
-      <p className="text-[11px] font-semibold uppercase text-[#707070]">
-        {label}
-      </p>
-      <p className="mt-1 text-lg font-semibold text-[#222]">{value}</p>
-      <p className="mt-1 text-[11px] leading-4 text-[#888]">{hint}</p>
-    </div>
-  );
-}
-
-function Pill({
-  children,
-  kind = "soft",
-}: {
-  children: ReactNode;
-  kind?: "soft" | "hot";
-}) {
-  return (
-    <span
-      className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium ${
-        kind === "hot"
-          ? "border-[#f0a060]/40 bg-[#fff7ed] text-[#b85b12]"
-          : "border-[#e8e5dd] bg-[#fbfaf7] text-[#555]"
-      }`}
-    >
-      {children}
-    </span>
-  );
-}
-
-function Badge({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center rounded-full border border-[#e8e5dd] bg-[#fbfaf7] px-2.5 py-1 text-[11px] font-semibold text-[#555]">
-      {children}
-    </span>
-  );
-}
-
-function DenseBlock({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-lg border border-[#e8e5dd] bg-[#fbfaf7] p-3">
-      <p className="text-[11px] font-semibold uppercase text-[#707070]">
-        {label}
-      </p>
-      <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-[#333]">
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function MiniField({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-lg border border-[#e8e5dd] bg-[#fbfaf7] px-3 py-2">
-      <p className="text-[11px] font-semibold uppercase text-[#707070]">
-        {label}
-      </p>
-      <p className="mt-1 text-sm font-medium text-[#222]">{value}</p>
-    </div>
-  );
-}
-
-function CompactKV({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-md border border-[#e8e5dd] bg-white px-3 py-2">
-      <p className="text-[11px] font-semibold uppercase text-[#707070]">
-        {label}
-      </p>
-      <p className="mt-1 text-sm leading-6 text-[#333] whitespace-pre-wrap break-words">
-        {value}
-      </p>
+    <div className="rounded-md bg-[#fbfaf7] p-2.5">
+      <p className="text-[11px] font-semibold text-[#999] uppercase">{label}</p>
+      <p className="mt-0.5 text-xs text-[#333] leading-relaxed">{value}</p>
     </div>
   );
 }

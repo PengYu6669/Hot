@@ -7,9 +7,11 @@ import { AppShell } from "./app-shell";
 import { HotEventCard } from "./components/dashboard/HotEventCard";
 import { RadarChart } from "./components/dashboard/RadarChart";
 import { AgentDialogue } from "./components/dashboard/AgentDialogue";
+import { MonitorHeader } from "./components/dashboard/MonitorHeader";
 import type { DecisionStatus, RejectReason } from "./components/dashboard/types";
 import { useOperationReviews } from "./hooks/use-operation-reviews";
 import { createVideoStoryboard } from "@/lib/video-story";
+import Link from "next/link";
 
 const searchPresets = ["OpenAI", "Sora", "Agent", "模型发布", "融资", "论文"];
 
@@ -184,7 +186,10 @@ export function HotAgentWorkbench({
         ))}
       </div>
 
-      <section className="dashboard-workspace grid gap-4 xl:h-[calc(100vh-132px)] xl:min-h-0 xl:grid-cols-[0.82fr_1.34fr_0.92fr] xl:items-stretch xl:overflow-hidden">
+      {/* Smart monitoring header */}
+      <MonitorHeader events={dashboard.events} />
+
+      <section className="dashboard-workspace grid gap-4 xl:h-[calc(100vh-220px)] xl:min-h-0 xl:grid-cols-[0.82fr_1.34fr_0.92fr] xl:items-stretch xl:overflow-hidden">
         {/* LEFT: search + event list */}
         <aside className={`grid gap-3 ${mobilePanel === "list" ? "" : "hidden"} xl:flex xl:min-h-0 xl:flex-col`}>
           <section className="rounded-lg border border-[#dcd8cf] bg-white p-3 shadow-sm">
@@ -243,14 +248,22 @@ export function HotAgentWorkbench({
                     exit={{ opacity: 0, scale: 0.95 }}
                     className={decisions[event.id] === "rejected" ? "opacity-40 grayscale" : ""}
                   >
-                    <HotEventCard
-                      event={event}
-                      active={event.id === selectedId}
-                      onSelect={(id) => {
-                        selectEvent(id);
-                        setMobilePanel("detail");
-                      }}
-                    />
+                    <div className="relative">
+                      <HotEventCard
+                        event={event}
+                        active={event.id === selectedId}
+                        onSelect={(id) => {
+                          selectEvent(id);
+                          setMobilePanel("detail");
+                        }}
+                      />
+                      <Link
+                        href={`/events?id=${event.id}`}
+                        className="absolute top-3 right-3 text-[10px] text-blue-600 hover:text-blue-700 hover:underline font-medium"
+                      >
+                        详情 →
+                      </Link>
+                    </div>
                   </motion.div>
                 ))}
               </AnimatePresence>

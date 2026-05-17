@@ -418,13 +418,18 @@ export async function createStrategy(
   {
     humanInstruction,
     includeAgentRun = true,
+    onToken,
+    previousStrategy,
   }: {
     humanInstruction?: string;
     includeAgentRun?: boolean;
+    onToken?: (token: string) => void;
+    previousStrategy?: Strategy | null;
   } = {},
 ): Promise<Strategy> {
   const startedAt = Date.now();
   const normalizedInstruction = humanInstruction?.trim();
+  const isRefinement = !!previousStrategy && !!normalizedInstruction;
   const fallback = createFallbackStrategy(event, normalizedInstruction);
   const fallbackOutput: AgentOutput = {
     titles: fallback.campaignBrief.titles,
@@ -439,8 +444,13 @@ export async function createStrategy(
     replicationPlaybook: fallback.replicationPlaybook,
     douyinOperationPlan: fallback.douyinOperationPlan,
   };
+  const refinementSuffix = isRefinement
+    ? "\n- 这是对已有策略的修改优化，请基于用户反馈针对性地调整策略，只修改用户要求改的部分，保持其他部分不变"
+    : "";
+
   const llmResult = await generateJsonWithLlmResult<Partial<AgentOutput>>({
     fallback: fallbackOutput,
+    onToken,
     system: `你是 HotAgent，一个融合了事件感知、热度挖掘、策略生成、风险管控四大能力的热点运营 Agent。
 
 你的角色定义：
@@ -458,10 +468,24 @@ export async function createStrategy(
 - replicationPlaybook 必须回答“这类爆款以后如何复制”
 - douyinOperationPlan 必须回答“抖音化运营动作如何落地”
 - shortVideoScript 必须是可直接录成竖屏视频的分镜脚本，按 0-3s / 3-10s / 10-20s / 20-30s 分段
-- 语言克制、专业，面向运营中台场景`,
+- 语言克制、专业，面向运营中台场景${refinementSuffix}`,
     user: JSON.stringify({
-      instruction: "请以 HotAgent 身份完成全流程运营判断，输出完整 JSON。",
+      instruction: isRefinement
+        ? "用户对上一次策略有反馈意见，请针对性地修改优化策略，只调整用户提到的问题，其他保持不变。"
+        : "请以 HotAgent 身份完成全流程运营判断，输出完整 JSON。",
       humanInstruction: normalizedInstruction || null,
+      previousStrategy: previousStrategy
+        ? {
+            titles: previousStrategy.campaignBrief.titles,
+            shortVideoScript: previousStrategy.campaignBrief.shortVideoScript,
+            commentGuide: previousStrategy.campaignBrief.commentGuide,
+            riskGuardrail: previousStrategy.campaignBrief.riskGuardrail,
+            distributionPlan: previousStrategy.campaignBrief.distributionPlan,
+            reasoning: previousStrategy.reasoning,
+            douyinOperationPlan: previousStrategy.douyinOperationPlan,
+            monetizationPlan: previousStrategy.monetizationPlan,
+          }
+        : undefined,
       event: {
         title: event.title,
         summary: event.summary,

@@ -11,7 +11,7 @@ type ChatCompletionResponse = {
   }>;
 };
 
-const DEFAULT_TIMEOUT_MS = 30000;
+const DEFAULT_TIMEOUT_MS = 60000;
 
 export type LlmGenerationResult<T> = {
   output: T;
@@ -26,15 +26,18 @@ export async function generateJsonWithLlm<T>({
   system,
   user,
   fallback,
+  onToken,
 }: {
   system: string;
   user: string;
   fallback: T;
+  onToken?: (token: string) => void;
 }): Promise<T> {
   const result = await generateJsonWithLlmResult({
     system,
     user,
     fallback,
+    onToken,
   });
   return result.output;
 }
@@ -43,10 +46,12 @@ export async function generateJsonWithLlmResult<T>({
   system,
   user,
   fallback,
+  onToken,
 }: {
   system: string;
   user: string;
   fallback: T;
+  onToken?: (token: string) => void;
 }): Promise<LlmGenerationResult<T>> {
   const startedAt = Date.now();
   const apiKey = process.env.DEEPSEEK_API_KEY;
@@ -65,17 +70,27 @@ export async function generateJsonWithLlmResult<T>({
   }
 
   try {
-    const response = await postChatCompletion({
-      baseUrl,
-      apiKey,
-      model,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-    });
+    const messages: ChatMessage[] = [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ];
 
-    const content = response.choices?.[0]?.message?.content;
+    // Use streaming when a token callback is provided
+    const content = onToken
+      ? await postChatCompletionStream({
+          baseUrl,
+          apiKey,
+          model,
+          messages,
+          onToken,
+        })
+      : await postChatCompletion({
+          baseUrl,
+          apiKey,
+          model,
+          messages,
+        }).then((r) => r.choices?.[0]?.message?.content ?? "");
+
     if (!content) {
       return {
         output: fallback,
@@ -143,6 +158,83 @@ async function postChatCompletion({
     }
 
     return (await response.json()) as ChatCompletionResponse;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function postChatCompletionStream({
+  baseUrl,
+  apiKey,
+  model,
+  messages,
+  onToken,
+}: {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  messages: ChatMessage[];
+  onToken: (token: string) => void;
+}): Promise<string> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(getChatCompletionUrl(baseUrl), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: 0.4,
+        stream: true,
+      }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new Error(`LLM stream request failed: ${response.status}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("No stream body");
+
+    const decoder = new TextDecoder();
+    let fullContent = "";
+    let buffer = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith("data:")) continue;
+        const data = trimmed.slice(5).trim();
+        if (data === "[DONE]") continue;
+
+        try {
+          const parsed = JSON.parse(data);
+          const token = parsed.choices?.[0]?.delta?.content;
+          if (token) {
+            fullContent += token;
+            onToken(token);
+          }
+        } catch {
+          // Skip unparseable chunks
+        }
+      }
+    }
+
+    return fullContent;
   } finally {
     clearTimeout(timeout);
   }
